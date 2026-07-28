@@ -10,6 +10,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
 jest.mock('argon2');
+// eslint-disable-next-line @typescript-eslint/no-unsafe-return -- jest.requireActual is untyped (`any`); argon2 needs the real crypto exports alongside the mocked randomUUID
 jest.mock('crypto', () => ({
   ...jest.requireActual('crypto'),
   randomUUID: jest.fn(),
@@ -217,6 +218,7 @@ describe('AuthService', () => {
           id: '11111111-1111-1111-1111-111111111111',
           userId: existingUser.id,
           tokenHash: 'hashed:signed-refresh-token',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.any() is typed `any` in @types/jest; no cast survives the no-unnecessary-type-assertion autofix
           expiresAt: expect.any(Date),
         },
       });

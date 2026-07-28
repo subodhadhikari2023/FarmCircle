@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
@@ -13,7 +17,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-  ) { }
+  ) {}
 
   async register(dto: RegisterDto) {
     const existingUser = await this.prisma.user.findUnique({
@@ -54,10 +58,15 @@ export class AuthService {
       throw new UnauthorizedException('User with this email does not exist');
     }
     if (user.passwordHash === null) {
-      throw new UnauthorizedException('Password login is not available for this account');
+      throw new UnauthorizedException(
+        'Password login is not available for this account',
+      );
     }
 
-    const isPasswordValid = await argon2.verify(user.passwordHash, dto.password);
+    const isPasswordValid = await argon2.verify(
+      user.passwordHash,
+      dto.password,
+    );
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid password');
@@ -94,9 +103,5 @@ export class AuthService {
       },
     });
     return { accessToken, refreshToken };
-
   }
-
-
-
 }

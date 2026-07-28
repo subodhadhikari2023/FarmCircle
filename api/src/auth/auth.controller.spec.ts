@@ -45,13 +45,14 @@ describe('AuthController', () => {
         accessToken: 'signed-access-token',
         refreshToken: 'signed-refresh-token',
       });
+      const cookieMock = jest.fn();
       const mockResponse = {
-        cookie: jest.fn(),
+        cookie: cookieMock,
       } as unknown as Response;
 
       const result = await controller.login(loginDto, mockResponse);
 
-      expect(mockResponse.cookie).toHaveBeenCalledWith(
+      expect(cookieMock).toHaveBeenCalledWith(
         'refreshToken',
         'signed-refresh-token',
         {

@@ -6,19 +6,15 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 @Controller('auth')
 export class AuthController {
-
-
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
   ) {}
 
-
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
-
 
   @Post('login')
   async login(
@@ -36,5 +32,4 @@ export class AuthController {
 
     return { accessToken };
   }
-
 }
