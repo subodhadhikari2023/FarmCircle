@@ -33,11 +33,14 @@ describe('AuthService', () => {
     },
     refreshToken: {
       create: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
     },
   };
 
   const mockJwtService = {
     sign: jest.fn(),
+    verify: jest.fn(),
   };
 
   const mockConfigService = {
@@ -258,6 +261,192 @@ describe('AuthService', () => {
       await expect(service.login(loginDto)).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+  });
+
+  describe('refresh', () => {
+    const refreshToken = 'incoming-refresh-token';
+    const decodedPayload = {
+      sub: 'user-id',
+      jti: '11111111-1111-1111-1111-111111111111',
+    };
+    const existingUser = {
+      id: 'user-id',
+      email: 'vendor@example.com',
+      name: 'Test Vendor',
+      role: 'VENDOR',
+      passwordHash: 'hashed-password',
+    };
+    const storedRefreshToken = {
+      id: decodedPayload.jti,
+      userId: existingUser.id,
+      tokenHash: 'hashed-refresh-token',
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60),
+      revokedAt: null as Date | null,
+    };
+
+    it('throws UnauthorizedException when the refresh token JWT is invalid or expired', async () => {
+      mockJwtService.verify.mockImplementation(() => {
+        throw new Error('jwt expired');
+      });
+
+      await expect(service.refresh(refreshToken)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrismaService.refreshToken.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when no RefreshToken row exists for the jti', async () => {
+      mockJwtService.verify.mockReturnValue(decodedPayload);
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(null);
+
+      await expect(service.refresh(refreshToken)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrismaService.refreshToken.findUnique).toHaveBeenCalledWith({
+        where: { id: decodedPayload.jti },
+      });
+    });
+
+    it('throws UnauthorizedException when the stored RefreshToken row was already revoked (reuse detected)', async () => {
+      mockJwtService.verify.mockReturnValue(decodedPayload);
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue({
+        ...storedRefreshToken,
+        revokedAt: new Date(Date.now() - 1000),
+      });
+
+      await expect(service.refresh(refreshToken)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(argon2.verify).not.toHaveBeenCalled();
+      expect(mockPrismaService.refreshToken.update).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when the stored RefreshToken row is expired', async () => {
+      mockJwtService.verify.mockReturnValue(decodedPayload);
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue({
+        ...storedRefreshToken,
+        expiresAt: new Date(Date.now() - 1000),
+      });
+
+      await expect(service.refresh(refreshToken)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(argon2.verify).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when the token hash does not match the stored hash', async () => {
+      mockJwtService.verify.mockReturnValue(decodedPayload);
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(
+        storedRefreshToken,
+      );
+      (argon2.verify as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.refresh(refreshToken)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrismaService.refreshToken.update).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when the user record no longer exists', async () => {
+      mockJwtService.verify.mockReturnValue(decodedPayload);
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(
+        storedRefreshToken,
+      );
+      (argon2.verify as jest.Mock).mockResolvedValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.refresh(refreshToken)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrismaService.refreshToken.update).not.toHaveBeenCalled();
+    });
+
+    it('rotates the refresh token: revokes the old row, signs new tokens, and persists a new hashed row', async () => {
+      mockJwtService.verify.mockReturnValue(decodedPayload);
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(
+        storedRefreshToken,
+      );
+      mockPrismaService.user.findUnique.mockResolvedValue(existingUser);
+      (argon2.verify as jest.Mock).mockResolvedValue(true);
+      (argon2.hash as jest.Mock).mockImplementation((input: string) =>
+        Promise.resolve(`hashed:${input}`),
+      );
+      (crypto.randomUUID as jest.Mock).mockReturnValue(
+        '22222222-2222-2222-2222-222222222222',
+      );
+      mockJwtService.sign.mockImplementation(
+        (_payload: unknown, options: { secret: string }) =>
+          options.secret === JWT_CONFIG.JWT_ACCESS_SECRET
+            ? 'new-signed-access-token'
+            : 'new-signed-refresh-token',
+      );
+      mockPrismaService.refreshToken.update.mockResolvedValue({});
+      mockPrismaService.refreshToken.create.mockResolvedValue({});
+
+      const result = await service.refresh(refreshToken);
+
+      expect(mockPrismaService.refreshToken.update).toHaveBeenCalledWith({
+        where: { id: decodedPayload.jti },
+        data: {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.any() is typed `any` in @types/jest; no cast survives the no-unnecessary-type-assertion autofix
+          revokedAt: expect.any(Date),
+        },
+      });
+      expect(mockJwtService.sign).toHaveBeenNthCalledWith(
+        1,
+        { sub: existingUser.id, role: existingUser.role },
+        {
+          secret: JWT_CONFIG.JWT_ACCESS_SECRET,
+          expiresIn: JWT_CONFIG.JWT_ACCESS_TTL_SECONDS,
+        },
+      );
+      expect(mockJwtService.sign).toHaveBeenNthCalledWith(
+        2,
+        {
+          sub: existingUser.id,
+          jti: '22222222-2222-2222-2222-222222222222',
+        },
+        {
+          secret: JWT_CONFIG.JWT_REFRESH_SECRET,
+          expiresIn: JWT_CONFIG.JWT_REFRESH_TTL_SECONDS,
+        },
+      );
+      expect(mockPrismaService.refreshToken.create).toHaveBeenCalledWith({
+        data: {
+          id: '22222222-2222-2222-2222-222222222222',
+          userId: existingUser.id,
+          tokenHash: 'hashed:new-signed-refresh-token',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.any() is typed `any` in @types/jest; no cast survives the no-unnecessary-type-assertion autofix
+          expiresAt: expect.any(Date),
+        },
+      });
+      expect(result).toEqual({
+        accessToken: 'new-signed-access-token',
+        refreshToken: 'new-signed-refresh-token',
+      });
+    });
+
+    it('never leaks the new refresh token payload without hashing it first', async () => {
+      mockJwtService.verify.mockReturnValue(decodedPayload);
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(
+        storedRefreshToken,
+      );
+      mockPrismaService.user.findUnique.mockResolvedValue(existingUser);
+      (argon2.verify as jest.Mock).mockResolvedValue(true);
+      (argon2.hash as jest.Mock).mockResolvedValue('hashed-new-refresh-token');
+      (crypto.randomUUID as jest.Mock).mockReturnValue(
+        '33333333-3333-3333-3333-333333333333',
+      );
+      mockJwtService.sign.mockReturnValue('some-signed-token');
+      mockPrismaService.refreshToken.create.mockResolvedValue({});
+
+      await service.refresh(refreshToken);
+
+      const [createArgs] = mockPrismaService.refreshToken.create.mock
+        .calls[0] as [{ data: { tokenHash: string } }];
+      expect(createArgs.data.tokenHash).toBe('hashed-new-refresh-token');
+      expect(createArgs.data).not.toHaveProperty('refreshToken');
     });
   });
 });
