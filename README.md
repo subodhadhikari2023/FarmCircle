@@ -1,50 +1,55 @@
 # FarmCircle
 
-A single-grower produce marketplace — one business managing crop production and inventory, selling to business buyers (Vendors) and individual customers (Customers), with an Admin role for platform moderation.
+A single-grower produce marketplace connecting crop production directly to wholesale (Vendor) and retail (Customer) buyers.
 
 [![CI](https://github.com/subodhadhikari2023/FarmCircle/actions/workflows/ci.yml/badge.svg)](https://github.com/subodhadhikari2023/FarmCircle/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## About
+## Highlight
 
-FarmCircle connects a single grower's operation directly to its buyers — Vendors (B2B, wholesale) and Customers (B2C, retail) — replacing the manual, ad hoc process of tracking crops, harvest timing, and orders with a proper system built around the real lifecycle of the business.
+JWT authentication with access/refresh token rotation, httpOnly cookie storage, and Argon2-hashed credentials — fully unit tested.
 
-It models the domain with real business rules: growth-cycle tracking from planting to harvest, wholesale vs. retail pricing with per-listing bounds, a pre-booking system for future yield with payment holds and expiry, and post-fulfillment grower reviews. Infrastructure is built the way a production system would be — Docker Compose for local orchestration, a CI pipeline enforcing lint/tests on every PR — rather than leaning on managed services that paper over those decisions.
+## Tech Stack
 
-## Project status
+![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)
+![NestJS](https://img.shields.io/badge/NestJS-E0234E?style=for-the-badge&logo=nestjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-2D3748?style=for-the-badge&logo=prisma&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-47A248?style=for-the-badge&logo=mongodb&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
 
-Early scaffolding. Only the [`api/`](api/) NestJS backend exists so far — the `AuthModule` (registration, login, JWT access/refresh tokens) is implemented and tested; the rest of the domain modules described in [`docs/`](docs/) are not yet built. The Next.js frontend has not been started.
+- Next.js
+- NestJS
+- TypeScript
+- PostgreSQL
+- Prisma
+- MongoDB
+- Redis
+- JWT
+- Google OAuth
+- Razorpay
+- Docker
+- GitHub Actions
 
-## Tech stack
+## Features
 
-| Concern | Choice |
-|---|---|
-| Frontend | Next.js (not yet started) |
-| Backend | NestJS |
-| Relational data | PostgreSQL + Prisma (users, crops/cycles/batches, listings, orders, pre-bookings, payments, reviews — anything needing strict relationships and ACID correctness) |
-| Variable-shape data | MongoDB + Mongoose (listing media/descriptions, batch activity logs, order status history — not yet added) |
-| Ephemeral state | Redis (pre-booking capacity counters, payment-hold TTLs — not yet added) |
-| Auth | JWT (access + refresh) + Google OAuth |
-| Payments | Razorpay (test mode) |
-| Infra | Docker Compose (local dev), GitHub Actions (CI) |
+- Grower-managed crop catalog with cycle templates and milestone-based batch tracking from planting to harvest
+- Tracked and direct listing paths, with harvest-ready listings auto-drafted from completed batches
+- Wholesale (Vendor) and retail (Customer) pricing with per-listing bounds and automatic retail-ceiling fallback
+- Pre-booking system for future yield with capacity caps, payment holds, and automatic expiry
+- JWT authentication (access + refresh tokens) with Google OAuth and role-based access control
+- Razorpay payment integration for orders and pre-booking deposits
+- Post-fulfillment grower reviews
 
-## Repo layout
+## Getting Started
 
+```bash
+git clone https://github.com/subodhadhikari2023/FarmCircle.git
+cd FarmCircle
 ```
-api/            NestJS backend (the only app that currently exists) — see api/README.md
-docs/           Product/architecture specs (requirements, API design, schema design)
-docker-compose.yml   postgres + mongo + redis + api, for local dev
-```
-
-## Documentation
-
-The full product spec lives in [`docs/`](docs/):
-
-- [`FarmCircle-Requirements.md`](docs/FarmCircle-Requirements.md) — roles, business rules, module list
-- [`FarmCircle-API-Design.md`](docs/FarmCircle-API-Design.md) — endpoint-by-endpoint REST design with access rules and status codes
-- [`FarmCircle-Schema-Design.md`](docs/FarmCircle-Schema-Design.md) — Postgres/Mongo/Redis schema rationale
-
-## Getting started
 
 Requires Docker and Docker Compose.
 
@@ -66,12 +71,34 @@ Requires Docker and Docker Compose.
    docker compose up -d --build
    ```
    This starts Postgres, Mongo, Redis, and the API (`http://localhost:3000`) in watch mode.
-3. Apply database migrations (see [`api/README.md`](api/README.md) for details on why this runs inside the container rather than on the host):
+3. Apply database migrations (see [`api/README.md`](api/README.md) for why this runs inside the container rather than on the host):
    ```bash
    docker compose run --rm api npx prisma migrate dev
    ```
 
 See [`api/README.md`](api/README.md) for backend-specific commands (tests, linting, Prisma).
+
+---
+
+## Project Status
+
+Early scaffolding. Only the [`api/`](api/) NestJS backend exists so far — the `AuthModule` (registration, login, JWT access/refresh tokens) is implemented and tested; the rest of the domain modules described in [`docs/`](docs/) are not yet built. The Next.js frontend has not been started.
+
+## Documentation
+
+The full product spec lives in [`docs/`](docs/):
+
+- [`FarmCircle-Requirements.md`](docs/FarmCircle-Requirements.md) — roles, business rules, module list
+- [`FarmCircle-API-Design.md`](docs/FarmCircle-API-Design.md) — endpoint-by-endpoint REST design with access rules and status codes
+- [`FarmCircle-Schema-Design.md`](docs/FarmCircle-Schema-Design.md) — Postgres/Mongo/Redis schema rationale
+
+## Repo Layout
+
+```
+api/            NestJS backend (the only app that currently exists) — see api/README.md
+docs/           Product/architecture specs (requirements, API design, schema design)
+docker-compose.yml   postgres + mongo + redis + api, for local dev
+```
 
 ## License
 
