@@ -82,10 +82,29 @@ model User {
   preBookings   PreBooking[]
   addresses     Address[]
 
+  // RefreshToken
+  refreshTokens RefreshToken[]
+
   // Review relations (a User can both give reviews and, if Grower, receive them)
   reviewsGiven    Review[] @relation("ReviewerReviews")
   reviewsReceived Review[] @relation("GrowerReviews")
 }
+
+
+
+// ─── Auth Sessions ───────────────────────────────────────
+  
+  model RefreshToken {
+    id         String    @id @default(uuid())
+    userId     String
+    user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    tokenHash  String
+    expiresAt  DateTime
+    revokedAt  DateTime?
+    createdAt  DateTime  @default(now())
+
+    @@index([userId])
+  }
 
 // ─── Catalog ─────────────────────────────────────────────
 
