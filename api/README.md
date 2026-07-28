@@ -1,98 +1,75 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# FarmCircle API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+NestJS backend for FarmCircle, a single-grower produce marketplace connecting a grower's operation to business buyers (Vendors) and individual customers (Customers). See the [root README](../README.md) for the project overview and [`docs/`](../docs/) for the full product spec.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Stack
 
-## Description
+- **NestJS** — application framework
+- **PostgreSQL + Prisma** — the transactional core: users, crop/cycle/batch structure, listings, orders, pre-bookings, payments, reviews. Prisma 7 with a driver adapter (`@prisma/adapter-pg`), custom client output at `generated/prisma` (not the default `node_modules/@prisma/client` location)
+- **MongoDB + Mongoose** *(not yet added)* — variable-shape/append-only content: listing media/descriptions, batch activity logs, order status history
+- **Redis** *(not yet added)* — pre-booking capacity counters and payment-hold TTLs
+- **JWT + Google OAuth** — authentication
+- **Razorpay** (test mode) — payments
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Getting started
 
-## Project setup
+The stack runs via Docker Compose from the repo root (see the [root README](../README.md#getting-started) for the `.env` setup and `docker compose up` step). From inside the running container, or in this directory if you have Node 22 and a local Postgres instance:
 
 ```bash
-$ npm install
+npm install
+npm run start:dev        # watch mode, http://localhost:3000
 ```
 
-## Compile and run the project
+### Database
+
+Prisma commands need to run against a reachable Postgres instance. `postgres` as a hostname only resolves inside the Docker network the containers share, so run these through Compose rather than directly on the host:
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+docker compose run --rm api npx prisma migrate dev --name <migration-name>
+docker compose run --rm api npx prisma generate
+docker compose run --rm api npx prisma studio
 ```
 
-## Run tests
+## Scripts
 
 ```bash
-# unit tests
-$ npm run test
+npm run start:dev        # watch mode
+npm run start:debug      # watch mode + debugger
+npm run build            # nest build
+npm run lint             # eslint --fix over src/apps/libs/test
+npm run format           # prettier --write src/test
 
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm run test             # jest unit tests (*.spec.ts, colocated with source)
+npm run test:watch
+npm run test:cov
+npm run test:e2e         # jest -c test/jest-e2e.json (test/*.e2e-spec.ts)
+npx jest src/path/to/file.spec.ts   # single unit test file
 ```
 
-## Deployment
+## Architecture
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+One NestJS module per owned entity/data concern (`AuthModule`, `UsersModule`, `CatalogModule`, `CycleModule`, `BatchModule`, `InventoryModule`, `OrderModule`, `PreBookingModule`, `PaymentModule`, `ReviewModule`) — role-based access is enforced with `@Roles()` + `RolesGuard` inside the module that owns the relevant data, rather than a module per role.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Two structural patterns run through the core domain model (`prisma/schema.prisma`):
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+1. **Template vs. instance** — `Cycle` + `Milestone` are grower-defined templates (ordered milestone sequences per crop). A `Batch` is an instance: creating one snapshots the cycle's milestones into `BatchMilestoneProgress` rows, so editing a `Cycle` later never retroactively changes an in-progress `Batch`.
+2. **Two paths to a `Listing`** — *tracked* (`Crop → Cycle → Batch → Listing`, auto-drafted when a batch hits its final milestone) vs. *direct* (`Crop → Listing`, for onboarding existing stock without cycle tracking).
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Business rules enforced at the service layer (not by Prisma itself) include price snapshotting at listing creation, a wholesale-to-retail pricing fallback below the minimum wholesale quantity, a per-listing retail order ceiling, and a pre-booking lifecycle (`QUEUED → AWAITING_PAYMENT → CONFIRMED/EXPIRED/CANCELLED`) with a 48-hour payment hold mirrored in Redis.
 
-## Resources
+## Auth
 
-Check out a few resources that may come in handy when working with NestJS:
+`AuthModule` currently implements:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+- `POST /auth/register` — email/password registration (Vendor/Customer roles)
+- `POST /auth/login` — validates credentials, returns a signed JWT access token in the response body, and sets a signed refresh token as an httpOnly cookie. A hashed copy of the refresh token is persisted (`RefreshToken` table) so it can be looked up and revoked later without ever storing the usable token itself.
 
-## Support
+`POST /auth/refresh`, `POST /auth/logout`, and route-level JWT verification (`JwtAuthGuard`) are not yet implemented.
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## Testing
 
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Business logic (pricing/eligibility calculations, order/pre-booking state transitions, auth guards) is covered with strict unit tests written before the implementation; third-party integration glue (Razorpay webhooks, OAuth callbacks) gets lighter after-the-fact coverage.
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+[MIT](../LICENSE)
