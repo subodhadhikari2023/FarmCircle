@@ -1,3 +1,5 @@
 /docs
 /backend/.gitignore
 .env
+.gitignore
+.gitignore
