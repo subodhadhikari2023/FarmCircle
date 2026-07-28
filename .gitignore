@@ -1,3 +1,6 @@
 /docs
 /backend/.gitignore
 .env
+.gitignore
+CLAUDE.md
+.gitignore
