@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { Response } from 'express';
+import { UnauthorizedException } from '@nestjs/common';
+import { Request, Response } from 'express';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -11,6 +12,7 @@ describe('AuthController', () => {
   const mockAuthService = {
     register: jest.fn(),
     login: jest.fn(),
+    refresh: jest.fn(),
   };
 
   const mockConfigService = {
@@ -63,6 +65,47 @@ describe('AuthController', () => {
         },
       );
       expect(result).toEqual({ accessToken: 'signed-access-token' });
+    });
+  });
+
+  describe('refresh', () => {
+    it('throws UnauthorizedException when no refreshToken cookie is present', async () => {
+      const mockRequest = { cookies: {} } as unknown as Request;
+      const mockResponse = { cookie: jest.fn() } as unknown as Response;
+
+      await expect(
+        controller.refresh(mockRequest, mockResponse),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(mockAuthService.refresh).not.toHaveBeenCalled();
+    });
+
+    it('exchanges the refresh token cookie for a new access token and rotates the cookie', async () => {
+      const mockRequest = {
+        cookies: { refreshToken: 'incoming-refresh-token' },
+      } as unknown as Request;
+      const cookieMock = jest.fn();
+      const mockResponse = { cookie: cookieMock } as unknown as Response;
+      mockAuthService.refresh.mockResolvedValue({
+        accessToken: 'new-signed-access-token',
+        refreshToken: 'new-signed-refresh-token',
+      });
+
+      const result = await controller.refresh(mockRequest, mockResponse);
+
+      expect(mockAuthService.refresh).toHaveBeenCalledWith(
+        'incoming-refresh-token',
+      );
+      expect(cookieMock).toHaveBeenCalledWith(
+        'refreshToken',
+        'new-signed-refresh-token',
+        {
+          httpOnly: true,
+          secure: false,
+          sameSite: 'strict',
+          maxAge: 604800 * 1000,
+        },
+      );
+      expect(result).toEqual({ accessToken: 'new-signed-access-token' });
     });
   });
 });
