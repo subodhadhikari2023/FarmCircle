@@ -1,2 +1,3 @@
 /docs
 /backend/.gitignore
+.env
