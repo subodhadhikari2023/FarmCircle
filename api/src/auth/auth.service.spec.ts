@@ -30,6 +30,7 @@ describe('AuthService', () => {
     user: {
       findUnique: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
     },
     refreshToken: {
       create: jest.fn(),
@@ -447,6 +448,97 @@ describe('AuthService', () => {
         .calls[0] as [{ data: { tokenHash: string } }];
       expect(createArgs.data.tokenHash).toBe('hashed-new-refresh-token');
       expect(createArgs.data).not.toHaveProperty('refreshToken');
+    });
+  });
+
+  describe('validateGoogleUser', () => {
+    const params = {
+      googleId: 'google-id-1',
+      email: 'vendor@example.com',
+      emailVerified: true,
+      name: 'Test Vendor',
+      role: 'VENDOR' as const,
+    };
+
+    it('returns the existing user when found by googleId, ignoring the passed-in role', async () => {
+      const existingUser = {
+        id: 'user-id',
+        email: params.email,
+        name: params.name,
+        role: 'CUSTOMER',
+      };
+      mockPrismaService.user.findUnique.mockResolvedValueOnce(existingUser);
+
+      const result = await service.validateGoogleUser(params);
+
+      expect(mockPrismaService.user.findUnique).toHaveBeenCalledWith({
+        where: { googleId: params.googleId },
+        select: { id: true, email: true, name: true, role: true },
+      });
+      expect(mockPrismaService.user.create).not.toHaveBeenCalled();
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+      expect(result).toEqual(existingUser);
+    });
+
+    it('links googleId to an existing verified-email account and returns it', async () => {
+      mockPrismaService.user.findUnique
+        .mockResolvedValueOnce(null) // by googleId
+        .mockResolvedValueOnce({ id: 'existing-user-id' }); // by email
+      const updatedUser = {
+        id: 'existing-user-id',
+        email: params.email,
+        name: params.name,
+        role: 'CUSTOMER',
+      };
+      mockPrismaService.user.update.mockResolvedValue(updatedUser);
+
+      const result = await service.validateGoogleUser(params);
+
+      expect(mockPrismaService.user.update).toHaveBeenCalledWith({
+        where: { id: 'existing-user-id' },
+        data: { googleId: params.googleId },
+        select: { id: true, email: true, name: true, role: true },
+      });
+      expect(mockPrismaService.user.create).not.toHaveBeenCalled();
+      expect(result).toEqual(updatedUser);
+    });
+
+    it('throws UnauthorizedException instead of linking when the Google email is unverified', async () => {
+      mockPrismaService.user.findUnique
+        .mockResolvedValueOnce(null) // by googleId
+        .mockResolvedValueOnce({ id: 'existing-user-id' }); // by email
+
+      await expect(
+        service.validateGoogleUser({ ...params, emailVerified: false }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+      expect(mockPrismaService.user.create).not.toHaveBeenCalled();
+    });
+
+    it('creates a new user with the role from the caller when no match exists', async () => {
+      mockPrismaService.user.findUnique
+        .mockResolvedValueOnce(null) // by googleId
+        .mockResolvedValueOnce(null); // by email
+      const createdUser = {
+        id: 'new-user-id',
+        email: params.email,
+        name: params.name,
+        role: params.role,
+      };
+      mockPrismaService.user.create.mockResolvedValue(createdUser);
+
+      const result = await service.validateGoogleUser(params);
+
+      expect(mockPrismaService.user.create).toHaveBeenCalledWith({
+        data: {
+          email: params.email,
+          name: params.name,
+          googleId: params.googleId,
+          role: params.role,
+        },
+        select: { id: true, email: true, name: true, role: true },
+      });
+      expect(result).toEqual(createdUser);
     });
   });
 });
