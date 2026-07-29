@@ -123,6 +123,26 @@ export class AuthService {
     return this.issueTokens(user.id, user.role);
   }
 
+  async logout(refreshToken: string | undefined): Promise<void> {
+    if (!refreshToken) {
+      return;
+    }
+
+    let payload: { jti: string };
+    try {
+      payload = this.jwtService.verify(refreshToken, {
+        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+      });
+    } catch {
+      return;
+    }
+
+    await this.prisma.refreshToken.updateMany({
+      where: { id: payload.jti, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   async validateGoogleUser(params: {
     googleId: string;
     email: string;

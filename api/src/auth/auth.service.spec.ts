@@ -36,6 +36,7 @@ describe('AuthService', () => {
       create: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
   };
 
@@ -448,6 +449,67 @@ describe('AuthService', () => {
         .calls[0] as [{ data: { tokenHash: string } }];
       expect(createArgs.data.tokenHash).toBe('hashed-new-refresh-token');
       expect(createArgs.data).not.toHaveProperty('refreshToken');
+    });
+  });
+
+  describe('logout', () => {
+    it('does nothing when no refresh token is given', async () => {
+      await service.logout(undefined);
+
+      expect(mockJwtService.verify).not.toHaveBeenCalled();
+      expect(mockPrismaService.refreshToken.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when the refresh token JWT is invalid or expired', async () => {
+      mockJwtService.verify.mockImplementation(() => {
+        throw new Error('jwt expired');
+      });
+
+      await expect(
+        service.logout('garbage-refresh-token'),
+      ).resolves.toBeUndefined();
+      expect(mockPrismaService.refreshToken.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('revokes the stored RefreshToken row matching the jti', async () => {
+      mockJwtService.verify.mockReturnValue({
+        sub: 'user-id',
+        jti: '11111111-1111-1111-1111-111111111111',
+      });
+      mockPrismaService.refreshToken.updateMany.mockResolvedValue({
+        count: 1,
+      });
+
+      await service.logout('a-valid-refresh-token');
+
+      expect(mockJwtService.verify).toHaveBeenCalledWith(
+        'a-valid-refresh-token',
+        { secret: JWT_CONFIG.JWT_REFRESH_SECRET },
+      );
+      expect(mockPrismaService.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: '11111111-1111-1111-1111-111111111111',
+          revokedAt: null,
+        },
+        data: {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.any() is typed `any` in @types/jest; no cast survives the no-unnecessary-type-assertion autofix
+          revokedAt: expect.any(Date),
+        },
+      });
+    });
+
+    it('is idempotent when the token was already revoked', async () => {
+      mockJwtService.verify.mockReturnValue({
+        sub: 'user-id',
+        jti: '11111111-1111-1111-1111-111111111111',
+      });
+      mockPrismaService.refreshToken.updateMany.mockResolvedValue({
+        count: 0,
+      });
+
+      await expect(
+        service.logout('an-already-revoked-refresh-token'),
+      ).resolves.toBeUndefined();
     });
   });
 
