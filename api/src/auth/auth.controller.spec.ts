@@ -13,6 +13,7 @@ describe('AuthController', () => {
     register: jest.fn(),
     login: jest.fn(),
     refresh: jest.fn(),
+    logout: jest.fn(),
   };
 
   const mockConfigService = {
@@ -106,6 +107,38 @@ describe('AuthController', () => {
         },
       );
       expect(result).toEqual({ accessToken: 'new-signed-access-token' });
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes the refresh token cookie and clears the cookie', async () => {
+      const mockRequest = {
+        cookies: { refreshToken: 'a-refresh-token' },
+      } as unknown as Request;
+      const clearCookieMock = jest.fn();
+      const mockResponse = {
+        clearCookie: clearCookieMock,
+      } as unknown as Response;
+      mockAuthService.logout.mockResolvedValue(undefined);
+
+      await controller.logout(mockRequest, mockResponse);
+
+      expect(mockAuthService.logout).toHaveBeenCalledWith('a-refresh-token');
+      expect(clearCookieMock).toHaveBeenCalledWith('refreshToken');
+    });
+
+    it('still clears the cookie when no refreshToken cookie is present', async () => {
+      const mockRequest = { cookies: {} } as unknown as Request;
+      const clearCookieMock = jest.fn();
+      const mockResponse = {
+        clearCookie: clearCookieMock,
+      } as unknown as Response;
+      mockAuthService.logout.mockResolvedValue(undefined);
+
+      await controller.logout(mockRequest, mockResponse);
+
+      expect(mockAuthService.logout).toHaveBeenCalledWith(undefined);
+      expect(clearCookieMock).toHaveBeenCalledWith('refreshToken');
     });
   });
 });
