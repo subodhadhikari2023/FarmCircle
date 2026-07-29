@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { CycleModule } from './cycle/cycle.module';
+import { BatchModule } from './batch/batch.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { CycleModule } from './cycle/cycle.module';
     UsersModule,
     CatalogModule,
     CycleModule,
+    BatchModule,
   ],
   controllers: [AppController],
   providers: [AppService],
