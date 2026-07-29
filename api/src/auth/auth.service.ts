@@ -5,11 +5,12 @@ import {
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
-import { RegisterDto } from './dto/register.dto';
+import { RegisterDto, RegisterableRoles } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtService } from '@nestjs/jwt/dist/jwt.service';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { Role } from 'generated/prisma/enums';
 
 @Injectable()
 export class AuthService {
@@ -119,6 +120,51 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
 
+    return this.issueTokens(user.id, user.role);
+  }
+
+  async validateGoogleUser(params: {
+    googleId: string;
+    email: string;
+    emailVerified: boolean;
+    name: string;
+    role: RegisterableRoles;
+  }) {
+    const { googleId, email, emailVerified, name, role } = params;
+    const select = { id: true, email: true, name: true, role: true } as const;
+
+    const existingByGoogleId = await this.prisma.user.findUnique({
+      where: { googleId },
+      select,
+    });
+    if (existingByGoogleId) {
+      return existingByGoogleId;
+    }
+
+    const existingByEmail = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (existingByEmail) {
+      if (!emailVerified) {
+        throw new UnauthorizedException(
+          'Google account email is not verified; cannot link to an existing account',
+        );
+      }
+      return this.prisma.user.update({
+        where: { id: existingByEmail.id },
+        data: { googleId },
+        select,
+      });
+    }
+
+    return this.prisma.user.create({
+      data: { email, name, googleId, role },
+      select,
+    });
+  }
+
+  async loginWithGoogle(user: { id: string; role: Role }) {
     return this.issueTokens(user.id, user.role);
   }
 
