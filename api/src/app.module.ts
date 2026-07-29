@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { CycleModule } from './cycle/cycle.module';
 import { BatchModule } from './batch/batch.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { BatchModule } from './batch/batch.module';
     CatalogModule,
     CycleModule,
     BatchModule,
+    InventoryModule,
   ],
   controllers: [AppController],
   providers: [AppService],
