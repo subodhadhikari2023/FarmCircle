@@ -1,16 +1,20 @@
 import {
   Body,
   Controller,
+  Get,
   Post,
   Req,
   Res,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -51,6 +55,30 @@ export class AuthController {
       await this.authService.refresh(refreshToken);
 
     this.setRefreshCookie(res, newRefreshToken);
+
+    return { accessToken };
+  }
+
+  @Get('google')
+  @UseGuards(GoogleAuthGuard)
+  googleAuth() {
+    // never runs: GoogleAuthGuard redirects to Google before the handler is reached
+  }
+
+  @Get('google/callback')
+  @UseGuards(AuthGuard('google'))
+  async googleAuthCallback(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (!req.user) {
+      throw new UnauthorizedException('Google authentication failed');
+    }
+
+    const { accessToken, refreshToken } =
+      await this.authService.loginWithGoogle(req.user);
+
+    this.setRefreshCookie(res, refreshToken);
 
     return { accessToken };
   }
