@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
 import { BatchesService } from './batches.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { BatchActivityLog } from './schemas/batch-activity-log.schema';
 
 describe('BatchesService', () => {
   let service: BatchesService;
@@ -31,13 +33,29 @@ describe('BatchesService', () => {
     $transaction: jest.fn(),
   };
 
+  const mockActivityLogModel = {
+    create: jest.fn(),
+    find: jest.fn(),
+  };
+
+  function stubActivityLog(entries: unknown[] = []) {
+    const sort = jest.fn().mockResolvedValue(entries);
+    mockActivityLogModel.find.mockReturnValue({ sort });
+    return sort;
+  }
+
   beforeEach(async () => {
     jest.clearAllMocks();
+    stubActivityLog();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BatchesService,
         { provide: PrismaService, useValue: mockPrismaService },
+        {
+          provide: getModelToken(BatchActivityLog.name),
+          useValue: mockActivityLogModel,
+        },
       ],
     }).compile();
 
@@ -203,13 +221,15 @@ describe('BatchesService', () => {
   });
 
   describe('findOne', () => {
-    it('returns the batch with its milestone progress ordered', async () => {
+    it('returns the batch with its milestone progress ordered and its activity log merged in', async () => {
       const batch = {
         id: 'b1',
         ownerId: 'u1',
         milestoneProgress: [{ id: 'p1', order: 1 }],
       };
       mockPrismaService.batch.findFirst.mockResolvedValue(batch);
+      const activityLog = [{ batchId: 'b1', note: 'Looking healthy' }];
+      const sort = stubActivityLog(activityLog);
 
       const result = await service.findOne('u1', 'b1');
 
@@ -222,7 +242,11 @@ describe('BatchesService', () => {
           },
         },
       });
-      expect(result).toEqual(batch);
+      expect(mockActivityLogModel.find).toHaveBeenCalledWith({
+        batchId: 'b1',
+      });
+      expect(sort).toHaveBeenCalledWith({ loggedAt: 1 });
+      expect(result).toEqual({ ...batch, activityLog });
     });
 
     it('throws NotFoundException when the batch does not exist or is not owned by the user', async () => {
@@ -231,6 +255,59 @@ describe('BatchesService', () => {
       await expect(service.findOne('u1', 'b1')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('addActivity', () => {
+    it('logs a freeform activity note for a batch owned by the requesting Grower', async () => {
+      mockPrismaService.batch.findFirst.mockResolvedValue({
+        id: 'b1',
+        ownerId: 'u1',
+      });
+      const created = { batchId: 'b1', note: 'Watered', photos: [] };
+      mockActivityLogModel.create.mockResolvedValue(created);
+
+      const result = await service.addActivity('u1', 'b1', {
+        note: 'Watered',
+      });
+
+      expect(mockPrismaService.batch.findFirst).toHaveBeenCalledWith({
+        where: { id: 'b1', ownerId: 'u1' },
+      });
+      expect(mockActivityLogModel.create).toHaveBeenCalledWith({
+        batchId: 'b1',
+        note: 'Watered',
+        photos: [],
+      });
+      expect(result).toEqual(created);
+    });
+
+    it('passes through provided photos instead of defaulting them', async () => {
+      mockPrismaService.batch.findFirst.mockResolvedValue({
+        id: 'b1',
+        ownerId: 'u1',
+      });
+      mockActivityLogModel.create.mockResolvedValue({});
+
+      await service.addActivity('u1', 'b1', {
+        note: 'Watered',
+        photos: ['https://example.com/photo.jpg'],
+      });
+
+      expect(mockActivityLogModel.create).toHaveBeenCalledWith({
+        batchId: 'b1',
+        note: 'Watered',
+        photos: ['https://example.com/photo.jpg'],
+      });
+    });
+
+    it('throws NotFoundException when the batch does not exist or is not owned by the user', async () => {
+      mockPrismaService.batch.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.addActivity('u1', 'b1', { note: 'Watered' }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockActivityLogModel.create).not.toHaveBeenCalled();
     });
   });
 

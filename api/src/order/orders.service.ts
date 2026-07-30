@@ -4,10 +4,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { DisputeOrderDto } from './dto/dispute-order.dto';
 import { DeliveryMethod, OrderStatus, Role } from 'generated/prisma/enums';
+import {
+  OrderStatusHistory,
+  OrderStatusHistoryDocument,
+} from './schemas/order-status-history.schema';
 
 const CANCELLABLE_STATUSES: OrderStatus[] = [
   OrderStatus.PLACED,
@@ -28,7 +34,19 @@ const NEXT_STATUS: Partial<
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @InjectModel(OrderStatusHistory.name)
+    private readonly historyModel: Model<OrderStatusHistoryDocument>,
+  ) {}
+
+  private logStatusChange(
+    orderId: string,
+    status: OrderStatus,
+    changedBy: string,
+  ) {
+    return this.historyModel.create({ orderId, status, changedBy });
+  }
 
   async create(userId: string, role: Role, dto: CreateOrderDto) {
     const listing = await this.prisma.listing.findFirst({
@@ -94,6 +112,8 @@ export class OrdersService {
       }),
     ]);
 
+    await this.logStatusChange(order.id, order.status, userId);
+
     return order;
   }
 
@@ -112,7 +132,12 @@ export class OrdersService {
     if (role !== Role.ADMIN && order.buyerId !== userId) {
       throw new ForbiddenException('Not your order');
     }
-    return order;
+
+    const statusHistory = await this.historyModel
+      .find({ orderId: id })
+      .sort({ changedAt: 1 });
+
+    return { ...order, statusHistory };
   }
 
   async advanceStatus(userId: string, id: string) {
@@ -129,10 +154,14 @@ export class OrdersService {
       throw new ConflictException('Order has no further status to advance to');
     }
 
-    return this.prisma.order.update({
+    const updatedOrder = await this.prisma.order.update({
       where: { id },
       data: { status: nextStatusFor(order.deliveryMethod) },
     });
+
+    await this.logStatusChange(id, updatedOrder.status, userId);
+
+    return updatedOrder;
   }
 
   async cancel(userId: string, id: string) {
@@ -162,10 +191,12 @@ export class OrdersService {
       }),
     ]);
 
+    await this.logStatusChange(id, OrderStatus.CANCELLED, userId);
+
     return updatedOrder;
   }
 
-  async dispute(id: string, dto: DisputeOrderDto) {
+  async dispute(adminId: string, id: string, dto: DisputeOrderDto) {
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: { listing: true },
@@ -179,10 +210,12 @@ export class OrdersService {
       order.status !== OrderStatus.CANCELLED;
 
     if (!releasesStock) {
-      return this.prisma.order.update({
+      const updatedOrder = await this.prisma.order.update({
         where: { id },
         data: { status: dto.status },
       });
+      await this.logStatusChange(id, dto.status, adminId);
+      return updatedOrder;
     }
 
     const [updatedOrder] = await this.prisma.$transaction([
@@ -199,7 +232,7 @@ export class OrdersService {
         },
       }),
     ]);
-
+    await this.logStatusChange(id, dto.status, adminId);
     return updatedOrder;
   }
 }

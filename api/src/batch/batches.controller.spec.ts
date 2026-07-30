@@ -12,6 +12,7 @@ describe('BatchesController', () => {
     findOne: jest.fn(),
     advanceMilestone: jest.fn(),
     confirmHarvest: jest.fn(),
+    addActivity: jest.fn(),
   };
 
   const mockRequest = {
@@ -112,6 +113,23 @@ describe('BatchesController', () => {
         dto,
       );
       expect(result).toEqual(batch);
+    });
+  });
+
+  describe('addActivity', () => {
+    it("delegates to batchesService.addActivity with the authenticated user's id, id param, and dto", async () => {
+      const dto = { note: 'Watered' };
+      const entry = { batchId: 'b1', note: 'Watered', photos: [] };
+      mockBatchesService.addActivity.mockResolvedValue(entry);
+
+      const result = await controller.addActivity(mockRequest, 'b1', dto);
+
+      expect(mockBatchesService.addActivity).toHaveBeenCalledWith(
+        'u1',
+        'b1',
+        dto,
+      );
+      expect(result).toEqual(entry);
     });
   });
 });
