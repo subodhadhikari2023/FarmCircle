@@ -6,8 +6,10 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
+import { createHmac } from 'crypto';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
+import { RazorpayClient } from './../src/payment/razorpay-client.service';
 import {
   OrderStatusHistory,
   OrderStatusHistoryDocument,
@@ -16,6 +18,7 @@ import {
   DeliveryMethod,
   OrderStatus,
   PaymentMethod,
+  PaymentStatus,
   Role,
 } from './../generated/prisma/enums';
 
@@ -29,7 +32,9 @@ describe('OrderModule (e2e)', () => {
   const createdListingIds: string[] = [];
   const createdAddressIds: string[] = [];
   const createdOrderIds: string[] = [];
+  const createdOrderIntentIds: string[] = [];
   const PASSWORD = 'Test-Password-123';
+  const mockRazorpayClient = { createOrder: jest.fn() };
 
   async function createUser(role: Role, label: string) {
     const passwordHash = await argon2.hash(PASSWORD);
@@ -111,7 +116,11 @@ describe('OrderModule (e2e)', () => {
   async function createOrder(
     buyerId: string,
     listingId: string,
-    overrides: Partial<{ status: OrderStatus; quantity: number }> = {},
+    overrides: Partial<{
+      status: OrderStatus;
+      quantity: number;
+      paymentMethod: PaymentMethod;
+    }> = {},
   ) {
     const order = await prisma.order.create({
       data: {
@@ -121,7 +130,7 @@ describe('OrderModule (e2e)', () => {
         unitPrice: 50,
         totalAmount: (overrides.quantity ?? 5) * 50,
         deliveryMethod: DeliveryMethod.PICKUP,
-        paymentMethod: PaymentMethod.COD,
+        paymentMethod: overrides.paymentMethod ?? PaymentMethod.COD,
         status: overrides.status ?? OrderStatus.PLACED,
       },
     });
@@ -139,7 +148,10 @@ describe('OrderModule (e2e)', () => {
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(RazorpayClient)
+      .useValue(mockRazorpayClient)
+      .compile();
 
     app = moduleFixture.createNestApplication();
     app.use(cookieParser());
@@ -157,9 +169,20 @@ describe('OrderModule (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (createdOrderIntentIds.length > 0) {
+      await prisma.payment.deleteMany({
+        where: { orderIntentId: { in: createdOrderIntentIds } },
+      });
+      await prisma.orderIntent.deleteMany({
+        where: { id: { in: createdOrderIntentIds } },
+      });
+    }
     if (createdOrderIds.length > 0) {
       await historyModel.deleteMany({
         orderId: { $in: createdOrderIds },
+      });
+      await prisma.payment.deleteMany({
+        where: { orderId: { in: createdOrderIds } },
       });
       await prisma.order.deleteMany({
         where: { id: { in: createdOrderIds } },
@@ -366,7 +389,7 @@ describe('OrderModule (e2e)', () => {
           quantity: 2,
           deliveryMethod: DeliveryMethod.DELIVERY,
           addressId: address.id,
-          paymentMethod: PaymentMethod.UPI,
+          paymentMethod: PaymentMethod.COD,
         })
         .expect(201);
 
@@ -661,6 +684,122 @@ describe('OrderModule (e2e)', () => {
         where: { id: listing.id },
       });
       expect(updatedListing.availableQuantity.toNumber()).toBe(100);
+    });
+  });
+
+  describe('POST /orders with ONLINE/UPI payment', () => {
+    beforeEach(() => {
+      mockRazorpayClient.createOrder.mockReset();
+    });
+
+    it('creates an OrderIntent and a Razorpay payment intent, without creating an Order or decrementing stock', async () => {
+      const customer = await createUser(Role.CUSTOMER, 'intent-happy');
+      const token = await loginAndGetToken(customer.email);
+      const grower = await createUser(Role.GROWER, 'intent-happy-grower');
+      const crop = await createCrop(grower.id, 'Crop intent-happy');
+      const variety = await createVariety(crop.id, 'Variety intent-happy');
+      const listing = await createListing(grower.id, crop.id, variety.id);
+
+      mockRazorpayClient.createOrder.mockResolvedValue({
+        id: 'order_direct_intent',
+        amount: 25000,
+        currency: 'INR',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          listingId: listing.id,
+          quantity: 5,
+          deliveryMethod: DeliveryMethod.PICKUP,
+          paymentMethod: PaymentMethod.ONLINE,
+        })
+        .expect(201);
+
+      expect(res.body).toMatchObject({
+        razorpayOrderId: 'order_direct_intent',
+        amount: 250,
+        currency: 'INR',
+      });
+      const orderIntentId = (res.body as { orderIntentId: string })
+        .orderIntentId;
+      expect(orderIntentId).toBeDefined();
+      createdOrderIntentIds.push(orderIntentId);
+
+      const ordersForListing = await prisma.order.findMany({
+        where: { listingId: listing.id },
+      });
+      expect(ordersForListing).toHaveLength(0);
+      const updatedListing = await prisma.listing.findUniqueOrThrow({
+        where: { id: listing.id },
+      });
+      expect(updatedListing.availableQuantity.toNumber()).toBe(100);
+    });
+  });
+
+  describe('POST /orders/verify-payment', () => {
+    it('returns 401 without a token', () => {
+      return request(app.getHttpServer())
+        .post('/orders/verify-payment')
+        .send({
+          orderIntentId: 'irrelevant',
+          razorpayOrderId: 'x',
+          razorpayPaymentId: 'y',
+          razorpaySignature: 'z',
+        })
+        .expect(401);
+    });
+
+    it('marks the Payment SUCCESS when the signature is valid', async () => {
+      const customer = await createUser(Role.CUSTOMER, 'verify-happy');
+      const token = await loginAndGetToken(customer.email);
+      const grower = await createUser(Role.GROWER, 'verify-happy-grower');
+      const crop = await createCrop(grower.id, 'Crop verify-happy');
+      const variety = await createVariety(crop.id, 'Variety verify-happy');
+      const listing = await createListing(grower.id, crop.id, variety.id);
+      const intent = await prisma.orderIntent.create({
+        data: {
+          buyerId: customer.id,
+          listingId: listing.id,
+          quantity: 5,
+          unitPrice: 50,
+          totalAmount: 250,
+          deliveryMethod: DeliveryMethod.PICKUP,
+          paymentMethod: PaymentMethod.ONLINE,
+        },
+      });
+      createdOrderIntentIds.push(intent.id);
+      await prisma.payment.create({
+        data: {
+          orderIntentId: intent.id,
+          amount: 250,
+          method: PaymentMethod.ONLINE,
+          status: PaymentStatus.PENDING,
+          razorpayOrderId: 'order_verify_happy',
+        },
+      });
+
+      const razorpayOrderId = 'order_verify_happy';
+      const razorpayPaymentId = 'pay_verify_happy';
+      const signature = createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
+        .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+        .digest('hex');
+
+      const res = await request(app.getHttpServer())
+        .post('/orders/verify-payment')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          orderIntentId: intent.id,
+          razorpayOrderId,
+          razorpayPaymentId,
+          razorpaySignature: signature,
+        })
+        .expect(200);
+
+      expect((res.body as { status: string }).status).toBe(
+        PaymentStatus.SUCCESS,
+      );
     });
   });
 });

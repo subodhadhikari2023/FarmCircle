@@ -78,7 +78,8 @@ model User {
   listings    Listing[]
 
   // Buyer-side relations
-  ordersAsBuyer Order[]      @relation("BuyerOrders")
+  ordersAsBuyer Order[]       @relation("BuyerOrders")
+  orderIntents  OrderIntent[]
   preBookings   PreBooking[]
   addresses     Address[]
 
@@ -233,8 +234,9 @@ model Listing {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  orders      Order[]
-  preBookings PreBooking[]
+  orders       Order[]
+  orderIntents OrderIntent[]
+  preBookings  PreBooking[]
 }
 
 // ─── Orders ─────────────────────────────────────────────
@@ -249,7 +251,8 @@ model Address {
   longitude   Float
   createdAt   DateTime @default(now())
 
-  orders Order[]
+  orders       Order[]
+  orderIntents OrderIntent[]
 }
 
 model Order {
@@ -273,6 +276,28 @@ model Order {
 
   payment Payment?
   review  Review?
+}
+
+// Snapshot of a would-be Order's details, created for UPI/ONLINE checkouts
+// before payment is confirmed — the real Order is only created once the
+// Razorpay webhook confirms payment.captured (see PaymentsService.handleWebhook).
+// COD orders skip this entirely since payment isn't gating anything.
+model OrderIntent {
+  id             String         @id @default(uuid())
+  buyerId        String
+  buyer          User           @relation(fields: [buyerId], references: [id])
+  listingId      String
+  listing        Listing        @relation(fields: [listingId], references: [id])
+  quantity       Decimal
+  unitPrice      Decimal
+  totalAmount    Decimal
+  deliveryMethod DeliveryMethod
+  addressId      String?
+  address        Address?       @relation(fields: [addressId], references: [id])
+  paymentMethod  PaymentMethod
+  createdAt      DateTime       @default(now())
+
+  payment Payment?
 }
 
 // ─── Pre-bookings ───────────────────────────────────────
@@ -304,6 +329,8 @@ model Payment {
   order              Order?        @relation(fields: [orderId], references: [id])
   preBookingId       String?       @unique
   preBooking         PreBooking?   @relation(fields: [preBookingId], references: [id])
+  orderIntentId      String?       @unique
+  orderIntent        OrderIntent?  @relation(fields: [orderIntentId], references: [id])
   razorpayOrderId    String?
   razorpayPaymentId  String?
   razorpaySignature  String?
