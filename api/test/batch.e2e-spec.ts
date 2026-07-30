@@ -12,18 +12,25 @@ import {
   BatchActivityLog,
   BatchActivityLogDocument,
 } from './../src/batch/schemas/batch-activity-log.schema';
+import {
+  ListingContent,
+  ListingContentDocument,
+} from './../src/inventory/schemas/listing-content.schema';
 import { Role } from './../generated/prisma/enums';
 
 describe('BatchModule (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   let activityLogModel: Model<BatchActivityLogDocument>;
+  let contentModel: Model<ListingContentDocument>;
   const createdUserIds: string[] = [];
   const createdCropIds: string[] = [];
   const createdVarietyIds: string[] = [];
   const createdCycleIds: string[] = [];
   const createdMilestoneIds: string[] = [];
   const createdBatchIds: string[] = [];
+  const createdListingIds: string[] = [];
+  const createdPreBookingIds: string[] = [];
   const PASSWORD = 'Test-Password-123';
 
   async function createUser(role: Role, label: string) {
@@ -128,9 +135,23 @@ describe('BatchModule (e2e)', () => {
 
     prisma = app.get(PrismaService);
     activityLogModel = app.get(getModelToken(BatchActivityLog.name));
+    contentModel = app.get(getModelToken(ListingContent.name));
   });
 
   afterAll(async () => {
+    if (createdPreBookingIds.length > 0) {
+      await prisma.preBooking.deleteMany({
+        where: { id: { in: createdPreBookingIds } },
+      });
+    }
+    if (createdListingIds.length > 0) {
+      await contentModel.deleteMany({
+        listingId: { $in: createdListingIds },
+      });
+      await prisma.listing.deleteMany({
+        where: { id: { in: createdListingIds } },
+      });
+    }
     if (createdBatchIds.length > 0) {
       await activityLogModel.deleteMany({
         batchId: { $in: createdBatchIds },
@@ -510,7 +531,34 @@ describe('BatchModule (e2e)', () => {
         .expect(409);
     });
 
-    it('confirms the harvest once the final milestone is reached, and rejects a second confirmation', async () => {
+    it('returns 409 when the final milestone is reached but listing terms were never set', async () => {
+      const setup = await createFullSetup('confirm-noterms');
+      const batch = await createBatchViaApi(
+        setup.token,
+        setup.crop,
+        setup.variety,
+        setup.cycle,
+      );
+
+      await request(app.getHttpServer())
+        .patch(`/batches/${batch.id}/milestone`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({ reachedAt: '2026-02-01' })
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/batches/${batch.id}/milestone`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({ reachedAt: '2026-02-10' })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .patch(`/batches/${batch.id}/confirm-harvest`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({ actualYield: 75 })
+        .expect(409);
+    });
+
+    it('confirms the harvest once the final milestone is reached, publishing the draft Listing, and rejects a second confirmation', async () => {
       const setup = await createFullSetup('confirm-happy');
       const batch = await createBatchViaApi(
         setup.token,
@@ -530,6 +578,30 @@ describe('BatchModule (e2e)', () => {
         .send({ reachedAt: '2026-02-10' })
         .expect(200);
 
+      const draftRes = await request(app.getHttpServer())
+        .post(`/inventory/from-batch/${batch.id}`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({
+          retailPrice: 50,
+          wholesalePrice: 35,
+          minWholesaleQty: 15,
+          retailCeilingPercent: 10,
+          preBookablePercent: 60,
+        })
+        .expect(201);
+      const listingId = (draftRes.body as { id: string }).id;
+      createdListingIds.push(listingId);
+
+      const vendor = await createUser(Role.VENDOR, 'confirm-happy-vendor');
+      const vendorToken = await loginAndGetToken(vendor.email);
+      const preBookingRes = await request(app.getHttpServer())
+        .post('/prebookings')
+        .set('Authorization', `Bearer ${vendorToken}`)
+        .send({ batchId: batch.id, quantity: 20 })
+        .expect(201);
+      const preBookingId = (preBookingRes.body as { id: string }).id;
+      createdPreBookingIds.push(preBookingId);
+
       const res = await request(app.getHttpServer())
         .patch(`/batches/${batch.id}/confirm-harvest`)
         .set('Authorization', `Bearer ${setup.token}`)
@@ -538,6 +610,20 @@ describe('BatchModule (e2e)', () => {
       expect(res.body as { harvestConfirmed: boolean }).toMatchObject({
         harvestConfirmed: true,
       });
+
+      const listing = await prisma.listing.findUniqueOrThrow({
+        where: { id: listingId },
+      });
+      expect(listing.isPublished).toBe(true);
+      expect(listing.availableQuantity.toNumber()).toBe(75);
+
+      const preBooking = await prisma.preBooking.findUniqueOrThrow({
+        where: { id: preBookingId },
+      });
+      expect(preBooking.status).toBe('AWAITING_PAYMENT');
+      expect(preBooking.listingId).toBe(listingId);
+      expect(preBooking.advanceAmount?.toNumber()).toBe(140);
+      expect(preBooking.holdExpiresAt).not.toBeNull();
 
       await request(app.getHttpServer())
         .patch(`/batches/${batch.id}/confirm-harvest`)

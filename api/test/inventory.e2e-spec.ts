@@ -24,6 +24,7 @@ describe('InventoryModule (e2e)', () => {
   const createdCycleIds: string[] = [];
   const createdBatchIds: string[] = [];
   const createdListingIds: string[] = [];
+  const createdMilestoneIds: string[] = [];
   const PASSWORD = 'Test-Password-123';
 
   async function createUser(role: Role, label: string) {
@@ -83,6 +84,46 @@ describe('InventoryModule (e2e)', () => {
       },
     });
     createdBatchIds.push(batch.id);
+    return batch;
+  }
+
+  async function createMilestone(
+    cycleId: string,
+    name: string,
+    order: number,
+    expectedDurationDays: number,
+  ) {
+    const milestone = await prisma.milestone.create({
+      data: { cycleId, name, order, expectedDurationDays },
+    });
+    createdMilestoneIds.push(milestone.id);
+    return milestone;
+  }
+
+  async function createBatchAtMilestone(
+    ownerId: string,
+    cropId: string,
+    varietyId: string,
+    cycleId: string,
+    milestoneOrder: number,
+    currentMilestoneOrder: number,
+  ) {
+    const batch = await createBatch(ownerId, cropId, varietyId, cycleId, false);
+    await prisma.batchMilestoneProgress.create({
+      data: {
+        batchId: batch.id,
+        milestoneId: (
+          await createMilestone(cycleId, 'Harvested', milestoneOrder, 10)
+        ).id,
+        order: milestoneOrder,
+      },
+    });
+    if (currentMilestoneOrder > 0) {
+      await prisma.batch.update({
+        where: { id: batch.id },
+        data: { currentMilestoneOrder },
+      });
+    }
     return batch;
   }
 
@@ -153,8 +194,16 @@ describe('InventoryModule (e2e)', () => {
       });
     }
     if (createdBatchIds.length > 0) {
+      await prisma.batchMilestoneProgress.deleteMany({
+        where: { batchId: { in: createdBatchIds } },
+      });
       await prisma.batch.deleteMany({
         where: { id: { in: createdBatchIds } },
+      });
+    }
+    if (createdMilestoneIds.length > 0) {
+      await prisma.milestone.deleteMany({
+        where: { id: { in: createdMilestoneIds } },
       });
     }
     if (createdCycleIds.length > 0) {
@@ -416,35 +465,51 @@ describe('InventoryModule (e2e)', () => {
         .expect(403);
     });
 
-    it('returns only batches whose harvest has not been confirmed', async () => {
+    it('returns unpublished tracked draft listings, excluding published and direct-path listings', async () => {
       const grower = await createUser(Role.GROWER, 'upcoming-grower');
       const vendor = await createUser(Role.VENDOR, 'upcoming-vendor');
       const token = await loginAndGetToken(vendor.email);
       const crop = await createCrop(grower.id, 'Okra');
       const variety = await createVariety(crop.id, 'Green Okra');
       const cycle = await createCycle(grower.id, crop.id, 'Okra Cycle');
-      const growingBatch = await createBatch(
+      const growingBatch = await createBatchAtMilestone(
         grower.id,
         crop.id,
         variety.id,
         cycle.id,
-        false,
+        1,
+        1,
       );
-      const harvestedBatch = await createBatch(
+      const draftListing = await prisma.listing.create({
+        data: {
+          ownerId: grower.id,
+          cropId: crop.id,
+          varietyId: variety.id,
+          batchId: growingBatch.id,
+          hasTrackedCycle: true,
+          retailPrice: 50,
+          wholesalePrice: 35,
+          minWholesaleQty: 15,
+          retailCeilingPercent: 10,
+          preBookablePercent: 60,
+          availableQuantity: 0,
+          isPublished: false,
+        },
+      });
+      createdListingIds.push(draftListing.id);
+      const publishedListing = await createListing(
         grower.id,
         crop.id,
         variety.id,
-        cycle.id,
-        true,
       );
 
       const res = await request(app.getHttpServer())
         .get('/inventory/upcoming')
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
-      const ids = (res.body as Array<{ id: string }>).map((b) => b.id);
-      expect(ids).toContain(growingBatch.id);
-      expect(ids).not.toContain(harvestedBatch.id);
+      const ids = (res.body as Array<{ id: string }>).map((l) => l.id);
+      expect(ids).toContain(draftListing.id);
+      expect(ids).not.toContain(publishedListing.id);
     });
   });
 
@@ -552,6 +617,121 @@ describe('InventoryModule (e2e)', () => {
         .patch(`/inventory/${listing.id}/close`)
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(404);
+    });
+  });
+
+  describe('POST /inventory/from-batch/:batchId', () => {
+    const validTerms = () => ({
+      retailPrice: 50,
+      wholesalePrice: 35,
+      minWholesaleQty: 15,
+      retailCeilingPercent: 10,
+      preBookablePercent: 60,
+    });
+
+    it('returns 401 without a token', () => {
+      return request(app.getHttpServer())
+        .post('/inventory/from-batch/irrelevant')
+        .send(validTerms())
+        .expect(401);
+    });
+
+    it('returns 403 for a non-Grower', async () => {
+      const vendor = await createUser(Role.VENDOR, 'draft-nongrower');
+      const token = await loginAndGetToken(vendor.email);
+
+      await request(app.getHttpServer())
+        .post('/inventory/from-batch/irrelevant')
+        .set('Authorization', `Bearer ${token}`)
+        .send(validTerms())
+        .expect(403);
+    });
+
+    it('returns 404 for a batch not owned by the requesting Grower', async () => {
+      const growerA = await createUser(Role.GROWER, 'draft-notowned-a');
+      const growerB = await createUser(Role.GROWER, 'draft-notowned-b');
+      const tokenA = await loginAndGetToken(growerA.email);
+      const crop = await createCrop(growerB.id, 'Spinach');
+      const variety = await createVariety(crop.id, 'Palak');
+      const cycle = await createCycle(growerB.id, crop.id, 'Spinach cycle');
+      const batch = await createBatchAtMilestone(
+        growerB.id,
+        crop.id,
+        variety.id,
+        cycle.id,
+        1,
+        1,
+      );
+
+      await request(app.getHttpServer())
+        .post(`/inventory/from-batch/${batch.id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send(validTerms())
+        .expect(404);
+    });
+
+    it('returns 409 when the batch has not reached its final milestone yet', async () => {
+      const grower = await createUser(Role.GROWER, 'draft-tooearly');
+      const token = await loginAndGetToken(grower.email);
+      const crop = await createCrop(grower.id, 'Carrot');
+      const variety = await createVariety(crop.id, 'Orange Carrot');
+      const cycle = await createCycle(grower.id, crop.id, 'Carrot cycle');
+      const batch = await createBatchAtMilestone(
+        grower.id,
+        crop.id,
+        variety.id,
+        cycle.id,
+        1,
+        0,
+      );
+
+      await request(app.getHttpServer())
+        .post(`/inventory/from-batch/${batch.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(validTerms())
+        .expect(409);
+    });
+
+    it('creates an unpublished tracked listing once the batch is at its final milestone, and rejects a second draft', async () => {
+      const grower = await createUser(Role.GROWER, 'draft-happy');
+      const token = await loginAndGetToken(grower.email);
+      const crop = await createCrop(grower.id, 'Cabbage');
+      const variety = await createVariety(crop.id, 'Green Cabbage');
+      const cycle = await createCycle(grower.id, crop.id, 'Cabbage cycle');
+      const batch = await createBatchAtMilestone(
+        grower.id,
+        crop.id,
+        variety.id,
+        cycle.id,
+        1,
+        1,
+      );
+
+      const res = await request(app.getHttpServer())
+        .post(`/inventory/from-batch/${batch.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(validTerms())
+        .expect(201);
+      const body = res.body as {
+        id: string;
+        batchId: string;
+        hasTrackedCycle: boolean;
+        isPublished: boolean;
+        availableQuantity: string;
+      };
+      expect(body).toMatchObject({
+        batchId: batch.id,
+        hasTrackedCycle: true,
+        isPublished: false,
+      });
+      expect(Number(body.availableQuantity)).toBe(0);
+      createdListingIds.push(body.id);
+
+      await request(app.getHttpServer())
+        .post(`/inventory/from-batch/${batch.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(validTerms())
+        .expect(409);
     });
   });
 });

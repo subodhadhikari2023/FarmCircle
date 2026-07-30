@@ -10,6 +10,7 @@ describe('InventoryController', () => {
     create: jest.fn(),
     update: jest.fn(),
     close: jest.fn(),
+    createDraftFromBatch: jest.fn(),
   };
 
   const mockRequest = {
@@ -74,6 +75,39 @@ describe('InventoryController', () => {
       const result = await controller.close(mockRequest, 'l1');
 
       expect(mockListingsService.close).toHaveBeenCalledWith('u1', 'l1');
+      expect(result).toEqual(listing);
+    });
+  });
+
+  describe('createDraftFromBatch', () => {
+    it("delegates to listingsService.createDraftFromBatch with the authenticated user's id, batchId param, and dto", async () => {
+      const dto = {
+        retailPrice: 50,
+        wholesalePrice: 35,
+        minWholesaleQty: 15,
+        retailCeilingPercent: 10,
+        preBookablePercent: 60,
+      };
+      const listing = {
+        id: 'l1',
+        ownerId: 'u1',
+        batchId: 'b1',
+        isPublished: false,
+        ...dto,
+      };
+      mockListingsService.createDraftFromBatch.mockResolvedValue(listing);
+
+      const result = await controller.createDraftFromBatch(
+        mockRequest,
+        'b1',
+        dto,
+      );
+
+      expect(mockListingsService.createDraftFromBatch).toHaveBeenCalledWith(
+        'u1',
+        'b1',
+        dto,
+      );
       expect(result).toEqual(listing);
     });
   });
