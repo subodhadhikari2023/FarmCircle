@@ -19,6 +19,7 @@ describe('OrdersController', () => {
     advanceStatus: jest.fn(),
     cancel: jest.fn(),
     dispute: jest.fn(),
+    verifyPayment: jest.fn(),
   };
 
   const mockRequest = {
@@ -140,6 +141,28 @@ describe('OrdersController', () => {
         dto,
       );
       expect(result).toEqual(order);
+    });
+  });
+
+  describe('verifyPayment', () => {
+    it("delegates to ordersService.verifyPayment with the authenticated user's id, orderIntentId, and dto", async () => {
+      const dto = {
+        orderIntentId: 'oi1',
+        razorpayOrderId: 'order_abc',
+        razorpayPaymentId: 'pay_xyz',
+        razorpaySignature: 'sig',
+      };
+      const payment = { id: 'pay1', status: 'SUCCESS' };
+      mockOrdersService.verifyPayment.mockResolvedValue(payment);
+
+      const result = await controller.verifyPayment(mockRequest, dto);
+
+      expect(mockOrdersService.verifyPayment).toHaveBeenCalledWith(
+        'u1',
+        'oi1',
+        dto,
+      );
+      expect(result).toEqual(payment);
     });
   });
 });

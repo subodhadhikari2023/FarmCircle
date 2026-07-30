@@ -12,6 +12,8 @@ import {
   Role,
   PreBookingStatus,
   PaymentStatus,
+  DeliveryMethod,
+  PaymentMethod,
 } from './../generated/prisma/enums';
 
 describe('PaymentModule (e2e)', () => {
@@ -25,6 +27,8 @@ describe('PaymentModule (e2e)', () => {
   const createdBatchIds: string[] = [];
   const createdListingIds: string[] = [];
   const createdPreBookingIds: string[] = [];
+  const createdOrderIds: string[] = [];
+  const createdOrderIntentIds: string[] = [];
   const mockRazorpayClient = { createOrder: jest.fn() };
 
   function sign(body: string) {
@@ -125,6 +129,47 @@ describe('PaymentModule (e2e)', () => {
     return { grower, vendor, listing, preBooking };
   }
 
+  async function createOrderIntentSetup(label: string) {
+    const { grower, vendor: customer } = await createGrowerAndVendor(label);
+    const crop = await prisma.crop.create({
+      data: { ownerId: grower.id, name: `Crop ${label}` },
+    });
+    createdCropIds.push(crop.id);
+    const variety = await prisma.variety.create({
+      data: { cropId: crop.id, name: `Variety ${label}` },
+    });
+    createdVarietyIds.push(variety.id);
+    const listing = await prisma.listing.create({
+      data: {
+        ownerId: grower.id,
+        cropId: crop.id,
+        varietyId: variety.id,
+        hasTrackedCycle: false,
+        retailPrice: 50,
+        wholesalePrice: 35,
+        minWholesaleQty: 15,
+        retailCeilingPercent: 10,
+        preBookablePercent: 60,
+        availableQuantity: 100,
+        isPublished: true,
+      },
+    });
+    createdListingIds.push(listing.id);
+    const intent = await prisma.orderIntent.create({
+      data: {
+        buyerId: customer.id,
+        listingId: listing.id,
+        quantity: 5,
+        unitPrice: 50,
+        totalAmount: 250,
+        deliveryMethod: DeliveryMethod.PICKUP,
+        paymentMethod: PaymentMethod.ONLINE,
+      },
+    });
+    createdOrderIntentIds.push(intent.id);
+    return { customer, listing, intent };
+  }
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -148,6 +193,25 @@ describe('PaymentModule (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (createdOrderIntentIds.length > 0) {
+      await prisma.payment.deleteMany({
+        where: { orderIntentId: { in: createdOrderIntentIds } },
+      });
+      await prisma.order.deleteMany({
+        where: { listingId: { in: createdListingIds } },
+      });
+      await prisma.orderIntent.deleteMany({
+        where: { id: { in: createdOrderIntentIds } },
+      });
+    }
+    if (createdOrderIds.length > 0) {
+      await prisma.payment.deleteMany({
+        where: { orderId: { in: createdOrderIds } },
+      });
+      await prisma.order.deleteMany({
+        where: { id: { in: createdOrderIds } },
+      });
+    }
     if (createdPreBookingIds.length > 0) {
       await prisma.payment.deleteMany({
         where: { preBookingId: { in: createdPreBookingIds } },
@@ -268,6 +332,58 @@ describe('PaymentModule (e2e)', () => {
         where: { id: listing.id },
       });
       expect(updatedListing.availableQuantity.toNumber()).toBe(60);
+    });
+
+    it('converts a direct-order OrderIntent into a real Order and decrements stock', async () => {
+      const { customer, listing, intent } =
+        await createOrderIntentSetup('webhook-order');
+      await prisma.payment.create({
+        data: {
+          orderIntentId: intent.id,
+          amount: 250,
+          method: 'ONLINE',
+          status: PaymentStatus.PENDING,
+          razorpayOrderId: 'order_webhook_direct',
+        },
+      });
+
+      const body = JSON.stringify({
+        event: 'payment.captured',
+        payload: {
+          payment: {
+            entity: {
+              id: 'pay_webhook_direct',
+              order_id: 'order_webhook_direct',
+            },
+          },
+        },
+      });
+
+      await request(app.getHttpServer())
+        .post('/payments/webhook')
+        .set('Content-Type', 'application/json')
+        .set('x-razorpay-signature', sign(body))
+        .send(body)
+        .expect(200);
+
+      const payment = await prisma.payment.findUniqueOrThrow({
+        where: { orderIntentId: intent.id },
+      });
+      expect(payment.status).toBe(PaymentStatus.SUCCESS);
+      expect(payment.razorpayPaymentId).toBe('pay_webhook_direct');
+      expect(payment.orderId).not.toBeNull();
+
+      const order = await prisma.order.findFirstOrThrow({
+        where: { listingId: listing.id },
+      });
+      expect(order.buyerId).toBe(customer.id);
+      expect(order.quantity.toNumber()).toBe(5);
+      expect(order.totalAmount.toNumber()).toBe(250);
+
+      const updatedListing = await prisma.listing.findUniqueOrThrow({
+        where: { id: listing.id },
+      });
+      expect(updatedListing.availableQuantity.toNumber()).toBe(95);
     });
   });
 });

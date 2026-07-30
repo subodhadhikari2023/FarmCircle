@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -13,6 +15,7 @@ import type { Request } from 'express';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { DisputeOrderDto } from './dto/dispute-order.dto';
+import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -74,5 +77,13 @@ export class OrdersController {
   cancel(@Req() req: Request, @Param('id') id: string) {
     const user = this.requireUser(req);
     return this.ordersService.cancel(user.id, id);
+  }
+
+  @Post('verify-payment')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.VENDOR, Role.CUSTOMER)
+  verifyPayment(@Req() req: Request, @Body() dto: VerifyOrderPaymentDto) {
+    const user = this.requireUser(req);
+    return this.ordersService.verifyPayment(user.id, dto.orderIntentId, dto);
   }
 }

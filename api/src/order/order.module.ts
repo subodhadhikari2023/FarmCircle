@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { PrismaModule } from '../prisma/prisma.module';
+import { PaymentModule } from '../payment/payment.module';
 import {
   OrderStatusHistory,
   OrderStatusHistorySchema,
@@ -11,6 +12,7 @@ import {
 @Module({
   imports: [
     PrismaModule,
+    PaymentModule,
     MongooseModule.forFeature([
       { name: OrderStatusHistory.name, schema: OrderStatusHistorySchema },
     ]),
