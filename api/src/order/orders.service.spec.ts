@@ -1,0 +1,534 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { OrdersService } from './orders.service';
+import { PrismaService } from '../prisma/prisma.service';
+import {
+  DeliveryMethod,
+  OrderStatus,
+  PaymentMethod,
+  Role,
+} from 'generated/prisma/enums';
+
+const decimal = (n: number) => ({ toNumber: () => n });
+
+describe('OrdersService', () => {
+  let service: OrdersService;
+
+  const mockPrismaService = {
+    listing: {
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+    address: {
+      findFirst: jest.fn(),
+    },
+    order: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+    $transaction: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        OrdersService,
+        { provide: PrismaService, useValue: mockPrismaService },
+      ],
+    }).compile();
+
+    service = module.get<OrdersService>(OrdersService);
+  });
+
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
+
+  describe('create', () => {
+    const baseListing = {
+      id: 'l1',
+      ownerId: 'grower1',
+      isPublished: true,
+      isClosed: false,
+      retailPrice: decimal(50),
+      wholesalePrice: decimal(35),
+      minWholesaleQty: decimal(15),
+      retailCeilingPercent: decimal(10),
+      availableQuantity: decimal(100),
+    };
+
+    const pickupDto = {
+      listingId: 'l1',
+      quantity: 5,
+      deliveryMethod: DeliveryMethod.PICKUP,
+      paymentMethod: PaymentMethod.COD,
+    };
+
+    function stubTransaction(orderResult: unknown, listingResult?: unknown) {
+      mockPrismaService.order.create.mockReturnValue('order-create-op');
+      mockPrismaService.listing.update.mockReturnValue('listing-update-op');
+      mockPrismaService.$transaction.mockResolvedValue([
+        orderResult,
+        listingResult,
+      ]);
+    }
+
+    it('throws NotFoundException when the listing does not exist or is unpublished', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.create('u1', Role.CUSTOMER, pickupDto),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when the listing is closed', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue({
+        ...baseListing,
+        isClosed: true,
+      });
+
+      await expect(
+        service.create('u1', Role.CUSTOMER, pickupDto),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when quantity exceeds available stock', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+
+      await expect(
+        service.create('u1', Role.CUSTOMER, { ...pickupDto, quantity: 200 }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('prices a Vendor order at wholesale once quantity meets minWholesaleQty', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+      const created = { id: 'o1', unitPrice: 35, totalAmount: 525 };
+      stubTransaction(created, {
+        ...baseListing,
+        availableQuantity: decimal(85),
+      });
+
+      const result = await service.create('vendor1', Role.VENDOR, {
+        ...pickupDto,
+        quantity: 15,
+      });
+
+      expect(mockPrismaService.order.create).toHaveBeenCalledWith({
+        data: {
+          buyerId: 'vendor1',
+          listingId: 'l1',
+          quantity: 15,
+          unitPrice: 35,
+          totalAmount: 525,
+          deliveryMethod: DeliveryMethod.PICKUP,
+          addressId: null,
+          paymentMethod: PaymentMethod.COD,
+        },
+      });
+      expect(mockPrismaService.listing.update).toHaveBeenCalledWith({
+        where: { id: 'l1' },
+        data: { availableQuantity: 85 },
+      });
+      expect(result).toEqual(created);
+    });
+
+    it('falls back a Vendor order to retail pricing below minWholesaleQty', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+      const created = { id: 'o1', unitPrice: 50, totalAmount: 250 };
+      stubTransaction(created);
+
+      await service.create('vendor1', Role.VENDOR, {
+        ...pickupDto,
+        quantity: 5,
+      });
+
+      expect(mockPrismaService.order.create).toHaveBeenCalledWith({
+        data: {
+          buyerId: 'vendor1',
+          listingId: 'l1',
+          quantity: 5,
+          unitPrice: 50,
+          totalAmount: 250,
+          deliveryMethod: DeliveryMethod.PICKUP,
+          addressId: null,
+          paymentMethod: PaymentMethod.COD,
+        },
+      });
+    });
+
+    it('always prices a Customer order at retail', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+      const created = { id: 'o1', unitPrice: 50, totalAmount: 800 };
+      stubTransaction(created);
+
+      await service.create('customer1', Role.CUSTOMER, {
+        ...pickupDto,
+        quantity: 16,
+      });
+
+      expect(mockPrismaService.order.create).toHaveBeenCalledWith({
+        data: {
+          buyerId: 'customer1',
+          listingId: 'l1',
+          quantity: 16,
+          unitPrice: 50,
+          totalAmount: 800,
+          deliveryMethod: DeliveryMethod.PICKUP,
+          addressId: null,
+          paymentMethod: PaymentMethod.COD,
+        },
+      });
+    });
+
+    it('throws ConflictException when a Customer order exceeds the retail ceiling', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+
+      // minWholesaleQty 15, retailCeilingPercent 10 => ceiling is 16.5
+      await expect(
+        service.create('customer1', Role.CUSTOMER, {
+          ...pickupDto,
+          quantity: 17,
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('allows a Vendor order above the retail ceiling threshold (ceiling only applies to Customers)', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+      const created = { id: 'o1' };
+      stubTransaction(created);
+
+      await expect(
+        service.create('vendor1', Role.VENDOR, { ...pickupDto, quantity: 50 }),
+      ).resolves.toEqual(created);
+    });
+
+    it('requires and validates addressId ownership for delivery orders', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+      mockPrismaService.address.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.create('customer1', Role.CUSTOMER, {
+          ...pickupDto,
+          deliveryMethod: DeliveryMethod.DELIVERY,
+          addressId: 'addr1',
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('stores the validated addressId for a delivery order', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+      mockPrismaService.address.findFirst.mockResolvedValue({
+        id: 'addr1',
+        userId: 'customer1',
+      });
+      const created = { id: 'o1' };
+      stubTransaction(created);
+
+      await service.create('customer1', Role.CUSTOMER, {
+        ...pickupDto,
+        deliveryMethod: DeliveryMethod.DELIVERY,
+        addressId: 'addr1',
+      });
+
+      expect(mockPrismaService.address.findFirst).toHaveBeenCalledWith({
+        where: { id: 'addr1', userId: 'customer1' },
+      });
+      expect(mockPrismaService.order.create).toHaveBeenCalledWith({
+        data: {
+          buyerId: 'customer1',
+          listingId: 'l1',
+          quantity: 5,
+          unitPrice: 50,
+          totalAmount: 250,
+          deliveryMethod: DeliveryMethod.DELIVERY,
+          addressId: 'addr1',
+          paymentMethod: PaymentMethod.COD,
+        },
+      });
+    });
+  });
+
+  describe('findAllForUser', () => {
+    it('returns all orders for an Admin', async () => {
+      const orders = [{ id: 'o1' }, { id: 'o2' }];
+      mockPrismaService.order.findMany.mockResolvedValue(orders);
+
+      const result = await service.findAllForUser('admin1', Role.ADMIN);
+
+      expect(mockPrismaService.order.findMany).toHaveBeenCalledWith();
+      expect(result).toEqual(orders);
+    });
+
+    it("returns only the requesting buyer's orders for a Vendor/Customer", async () => {
+      const orders = [{ id: 'o1', buyerId: 'u1' }];
+      mockPrismaService.order.findMany.mockResolvedValue(orders);
+
+      const result = await service.findAllForUser('u1', Role.CUSTOMER);
+
+      expect(mockPrismaService.order.findMany).toHaveBeenCalledWith({
+        where: { buyerId: 'u1' },
+      });
+      expect(result).toEqual(orders);
+    });
+  });
+
+  describe('findOne', () => {
+    it('throws NotFoundException when the order does not exist', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue(null);
+
+      await expect(service.findOne('u1', Role.CUSTOMER, 'o1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws ForbiddenException when a non-owner, non-Admin requests the order', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        buyerId: 'someoneElse',
+      });
+
+      await expect(service.findOne('u1', Role.CUSTOMER, 'o1')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('returns the order for its own buyer', async () => {
+      const order = { id: 'o1', buyerId: 'u1' };
+      mockPrismaService.order.findUnique.mockResolvedValue(order);
+
+      const result = await service.findOne('u1', Role.CUSTOMER, 'o1');
+
+      expect(result).toEqual(order);
+    });
+
+    it('returns any order for an Admin regardless of buyer', async () => {
+      const order = { id: 'o1', buyerId: 'someoneElse' };
+      mockPrismaService.order.findUnique.mockResolvedValue(order);
+
+      const result = await service.findOne('admin1', Role.ADMIN, 'o1');
+
+      expect(result).toEqual(order);
+    });
+  });
+
+  describe('advanceStatus', () => {
+    it('throws NotFoundException when the order does not exist or its listing is not owned by the requesting Grower', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue(null);
+
+      await expect(service.advanceStatus('grower1', 'o1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('advances PLACED to CONFIRMED', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.PLACED,
+        deliveryMethod: DeliveryMethod.DELIVERY,
+        listing: { ownerId: 'grower1' },
+      });
+      const updated = { id: 'o1', status: OrderStatus.CONFIRMED };
+      mockPrismaService.order.update.mockResolvedValue(updated);
+
+      const result = await service.advanceStatus('grower1', 'o1');
+
+      expect(mockPrismaService.order.update).toHaveBeenCalledWith({
+        where: { id: 'o1' },
+        data: { status: OrderStatus.CONFIRMED },
+      });
+      expect(result).toEqual(updated);
+    });
+
+    it('advances CONFIRMED to OUT_FOR_DELIVERY for a delivery order', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.CONFIRMED,
+        deliveryMethod: DeliveryMethod.DELIVERY,
+        listing: { ownerId: 'grower1' },
+      });
+      mockPrismaService.order.update.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.OUT_FOR_DELIVERY,
+      });
+
+      await service.advanceStatus('grower1', 'o1');
+
+      expect(mockPrismaService.order.update).toHaveBeenCalledWith({
+        where: { id: 'o1' },
+        data: { status: OrderStatus.OUT_FOR_DELIVERY },
+      });
+    });
+
+    it('advances CONFIRMED to READY_FOR_PICKUP for a pickup order', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.CONFIRMED,
+        deliveryMethod: DeliveryMethod.PICKUP,
+        listing: { ownerId: 'grower1' },
+      });
+      mockPrismaService.order.update.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.READY_FOR_PICKUP,
+      });
+
+      await service.advanceStatus('grower1', 'o1');
+
+      expect(mockPrismaService.order.update).toHaveBeenCalledWith({
+        where: { id: 'o1' },
+        data: { status: OrderStatus.READY_FOR_PICKUP },
+      });
+    });
+
+    it('throws ConflictException when the order is already at a terminal status', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.DELIVERED,
+        deliveryMethod: DeliveryMethod.DELIVERY,
+        listing: { ownerId: 'grower1' },
+      });
+
+      await expect(service.advanceStatus('grower1', 'o1')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockPrismaService.order.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('cancel', () => {
+    it('throws NotFoundException when the order does not exist or is not owned by the requesting buyer', async () => {
+      mockPrismaService.order.findFirst.mockResolvedValue(null);
+
+      await expect(service.cancel('u1', 'o1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws ConflictException once the order is past a cancellable status', async () => {
+      mockPrismaService.order.findFirst.mockResolvedValue({
+        id: 'o1',
+        buyerId: 'u1',
+        status: OrderStatus.OUT_FOR_DELIVERY,
+      });
+
+      await expect(service.cancel('u1', 'o1')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('cancels a PLACED order and releases its quantity back to the listing', async () => {
+      mockPrismaService.order.findFirst.mockResolvedValue({
+        id: 'o1',
+        buyerId: 'u1',
+        status: OrderStatus.PLACED,
+        listingId: 'l1',
+        quantity: decimal(10),
+        listing: { id: 'l1', availableQuantity: decimal(90) },
+      });
+      mockPrismaService.order.update.mockReturnValue('order-update-op');
+      mockPrismaService.listing.update.mockReturnValue('listing-update-op');
+      const updatedOrder = { id: 'o1', status: OrderStatus.CANCELLED };
+      mockPrismaService.$transaction.mockResolvedValue([updatedOrder, {}]);
+
+      const result = await service.cancel('u1', 'o1');
+
+      expect(mockPrismaService.order.update).toHaveBeenCalledWith({
+        where: { id: 'o1' },
+        data: { status: OrderStatus.CANCELLED },
+      });
+      expect(mockPrismaService.listing.update).toHaveBeenCalledWith({
+        where: { id: 'l1' },
+        data: { availableQuantity: 100 },
+      });
+      expect(result).toEqual(updatedOrder);
+    });
+  });
+
+  describe('dispute', () => {
+    it('throws NotFoundException when the order does not exist', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.dispute('o1', { status: OrderStatus.CANCELLED }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('force-sets the status without validating the normal transition table', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.PLACED,
+        listingId: 'l1',
+        quantity: decimal(5),
+        listing: { id: 'l1', availableQuantity: decimal(95) },
+      });
+      const updated = { id: 'o1', status: OrderStatus.DELIVERED };
+      mockPrismaService.order.update.mockResolvedValue(updated);
+
+      const result = await service.dispute('o1', {
+        status: OrderStatus.DELIVERED,
+      });
+
+      expect(mockPrismaService.order.update).toHaveBeenCalledWith({
+        where: { id: 'o1' },
+        data: { status: OrderStatus.DELIVERED },
+      });
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(result).toEqual(updated);
+    });
+
+    it('releases stock back to the listing when forcing an order to CANCELLED', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.CONFIRMED,
+        listingId: 'l1',
+        quantity: decimal(5),
+        listing: { id: 'l1', availableQuantity: decimal(95) },
+      });
+      mockPrismaService.order.update.mockReturnValue('order-update-op');
+      mockPrismaService.listing.update.mockReturnValue('listing-update-op');
+      const updatedOrder = { id: 'o1', status: OrderStatus.CANCELLED };
+      mockPrismaService.$transaction.mockResolvedValue([updatedOrder, {}]);
+
+      const result = await service.dispute('o1', {
+        status: OrderStatus.CANCELLED,
+      });
+
+      expect(mockPrismaService.listing.update).toHaveBeenCalledWith({
+        where: { id: 'l1' },
+        data: { availableQuantity: 100 },
+      });
+      expect(result).toEqual(updatedOrder);
+    });
+
+    it('does not double-release stock when the order is already CANCELLED', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.CANCELLED,
+        listingId: 'l1',
+        quantity: decimal(5),
+        listing: { id: 'l1', availableQuantity: decimal(100) },
+      });
+      const updated = { id: 'o1', status: OrderStatus.CANCELLED };
+      mockPrismaService.order.update.mockResolvedValue(updated);
+
+      await service.dispute('o1', { status: OrderStatus.CANCELLED });
+
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(mockPrismaService.listing.update).not.toHaveBeenCalled();
+    });
+  });
+});
