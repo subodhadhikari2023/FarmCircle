@@ -7,6 +7,7 @@ import {
 import { getModelToken } from '@nestjs/mongoose';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PaymentsService } from '../payment/payments.service';
 import { OrderStatusHistory } from './schemas/order-status-history.schema';
 import {
   DeliveryMethod,
@@ -35,12 +36,20 @@ describe('OrdersService', () => {
       findFirst: jest.fn(),
       update: jest.fn(),
     },
+    orderIntent: {
+      create: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
 
   const mockHistoryModel = {
     create: jest.fn(),
     find: jest.fn(),
+  };
+
+  const mockPaymentsService = {
+    createOrderIntentPayment: jest.fn(),
+    verifyOrderIntentPayment: jest.fn(),
   };
 
   function stubHistory(entries: unknown[] = []) {
@@ -61,6 +70,7 @@ describe('OrdersService', () => {
           provide: getModelToken(OrderStatusHistory.name),
           useValue: mockHistoryModel,
         },
+        { provide: PaymentsService, useValue: mockPaymentsService },
       ],
     }).compile();
 
@@ -297,6 +307,56 @@ describe('OrdersService', () => {
           paymentMethod: PaymentMethod.COD,
         },
       });
+    });
+
+    it('creates an OrderIntent and returns a payment intent for ONLINE payment, without creating an Order or decrementing stock', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+      mockPrismaService.orderIntent.create.mockResolvedValue({
+        id: 'oi1',
+        buyerId: 'customer1',
+        listingId: 'l1',
+        quantity: 5,
+        unitPrice: 50,
+        totalAmount: 250,
+        deliveryMethod: DeliveryMethod.PICKUP,
+        addressId: null,
+        paymentMethod: PaymentMethod.ONLINE,
+      });
+      const intentPayment = {
+        orderIntentId: 'oi1',
+        razorpayOrderId: 'order_abc',
+        amount: 250,
+        currency: 'INR',
+        keyId: 'test-key-id',
+      };
+      mockPaymentsService.createOrderIntentPayment.mockResolvedValue(
+        intentPayment,
+      );
+
+      const result = await service.create('customer1', Role.CUSTOMER, {
+        ...pickupDto,
+        paymentMethod: PaymentMethod.ONLINE,
+      });
+
+      expect(mockPrismaService.orderIntent.create).toHaveBeenCalledWith({
+        data: {
+          buyerId: 'customer1',
+          listingId: 'l1',
+          quantity: 5,
+          unitPrice: 50,
+          totalAmount: 250,
+          deliveryMethod: DeliveryMethod.PICKUP,
+          addressId: null,
+          paymentMethod: PaymentMethod.ONLINE,
+        },
+      });
+      expect(mockPaymentsService.createOrderIntentPayment).toHaveBeenCalledWith(
+        'oi1',
+        250,
+      );
+      expect(mockPrismaService.order.create).not.toHaveBeenCalled();
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(result).toEqual(intentPayment);
     });
   });
 
@@ -588,6 +648,27 @@ describe('OrdersService', () => {
 
       expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
       expect(mockPrismaService.listing.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('verifyPayment', () => {
+    it('delegates to paymentsService.verifyOrderIntentPayment', async () => {
+      const dto = {
+        razorpayOrderId: 'order_abc',
+        razorpayPaymentId: 'pay_xyz',
+        razorpaySignature: 'sig',
+      };
+      const payment = { id: 'pay1', status: 'SUCCESS' };
+      mockPaymentsService.verifyOrderIntentPayment.mockResolvedValue(payment);
+
+      const result = await service.verifyPayment('u1', 'oi1', dto);
+
+      expect(mockPaymentsService.verifyOrderIntentPayment).toHaveBeenCalledWith(
+        'u1',
+        'oi1',
+        dto,
+      );
+      expect(result).toEqual(payment);
     });
   });
 });

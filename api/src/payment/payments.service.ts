@@ -174,7 +174,15 @@ export class PaymentsService {
     const payment = await this.prisma.payment.findFirst({
       where: { razorpayOrderId },
     });
-    if (!payment?.preBookingId) {
+    if (!payment) {
+      return { received: true };
+    }
+
+    if (payment.orderIntentId) {
+      return this.confirmOrderIntentPayment(payment, razorpayPaymentId);
+    }
+
+    if (!payment.preBookingId) {
       return { received: true };
     }
 
@@ -233,5 +241,137 @@ export class PaymentsService {
     await this.redis.clearPaymentHold(preBooking.id);
 
     return { received: true };
+  }
+
+  private async confirmOrderIntentPayment(
+    payment: {
+      id: string;
+      orderId: string | null;
+      orderIntentId: string | null;
+    },
+    razorpayPaymentId: string,
+  ) {
+    if (payment.orderId) {
+      return { received: true };
+    }
+
+    const intent = await this.prisma.orderIntent.findUnique({
+      where: { id: payment.orderIntentId! },
+    });
+    if (!intent) {
+      return { received: true };
+    }
+
+    const listing = await this.prisma.listing.findUniqueOrThrow({
+      where: { id: intent.listingId },
+    });
+    if (listing.availableQuantity.toNumber() < intent.quantity.toNumber()) {
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: { razorpayPaymentId, status: PaymentStatus.SUCCESS },
+      });
+      return { received: true };
+    }
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const createdOrder = await tx.order.create({
+        data: {
+          buyerId: intent.buyerId,
+          listingId: intent.listingId,
+          quantity: intent.quantity,
+          unitPrice: intent.unitPrice,
+          totalAmount: intent.totalAmount,
+          deliveryMethod: intent.deliveryMethod,
+          addressId: intent.addressId,
+          paymentMethod: intent.paymentMethod,
+        },
+      });
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          razorpayPaymentId,
+          status: PaymentStatus.SUCCESS,
+          orderId: createdOrder.id,
+        },
+      });
+      await tx.listing.update({
+        where: { id: listing.id },
+        data: {
+          availableQuantity:
+            listing.availableQuantity.toNumber() - intent.quantity.toNumber(),
+        },
+      });
+      return createdOrder;
+    });
+
+    await this.historyModel.create({
+      orderId: order.id,
+      status: order.status,
+      changedBy: intent.buyerId,
+    });
+
+    return { received: true };
+  }
+
+  async createOrderIntentPayment(orderIntentId: string, amount: number) {
+    const razorpayOrder = await this.razorpay.createOrder(
+      Math.round(amount * 100),
+      orderIntentId,
+    );
+    const payment = await this.prisma.payment.create({
+      data: {
+        orderIntentId,
+        amount,
+        method: PaymentMethod.ONLINE,
+        status: PaymentStatus.PENDING,
+        razorpayOrderId: razorpayOrder.id,
+      },
+    });
+
+    return {
+      orderIntentId,
+      razorpayOrderId: payment.razorpayOrderId,
+      amount: payment.amount.toNumber(),
+      currency: 'INR',
+      keyId: this.keyId(),
+    };
+  }
+
+  async verifyOrderIntentPayment(
+    userId: string,
+    orderIntentId: string,
+    dto: VerifyPaymentDto,
+  ) {
+    const intent = await this.prisma.orderIntent.findFirst({
+      where: { id: orderIntentId, buyerId: userId },
+    });
+    if (!intent) {
+      throw new NotFoundException('Order intent not found');
+    }
+
+    const payment = await this.prisma.payment.findUnique({
+      where: { orderIntentId },
+    });
+    if (!payment || payment.razorpayOrderId !== dto.razorpayOrderId) {
+      throw new BadRequestException(
+        'No matching payment intent for this order',
+      );
+    }
+
+    const expectedSignature = createHmac('sha256', this.keySecret())
+      .update(`${dto.razorpayOrderId}|${dto.razorpayPaymentId}`)
+      .digest('hex');
+    if (!safeEqual(expectedSignature, dto.razorpaySignature)) {
+      throw new BadRequestException('Invalid payment signature');
+    }
+
+    return this.prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        razorpayPaymentId: dto.razorpayPaymentId,
+        razorpaySignature: dto.razorpaySignature,
+        status: PaymentStatus.SUCCESS,
+      },
+    });
   }
 }
