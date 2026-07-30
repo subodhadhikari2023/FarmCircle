@@ -15,6 +15,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { OrderModule } from './order/order.module';
 import { PreBookingModule } from './prebooking/prebooking.module';
 import { PaymentModule } from './payment/payment.module';
+import { ReviewModule } from './review/review.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { PaymentModule } from './payment/payment.module';
     OrderModule,
     PreBookingModule,
     PaymentModule,
+    ReviewModule,
   ],
   controllers: [AppController],
   providers: [AppService],
