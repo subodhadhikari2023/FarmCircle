@@ -9,6 +9,7 @@ import { CatalogModule } from './catalog/catalog.module';
 import { CycleModule } from './cycle/cycle.module';
 import { BatchModule } from './batch/batch.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { OrderModule } from './order/order.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { InventoryModule } from './inventory/inventory.module';
     CycleModule,
     BatchModule,
     InventoryModule,
+    OrderModule,
   ],
   controllers: [AppController],
   providers: [AppService],
