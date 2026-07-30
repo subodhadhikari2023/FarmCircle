@@ -1,16 +1,23 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
+import {
+  BatchActivityLog,
+  BatchActivityLogDocument,
+} from './../src/batch/schemas/batch-activity-log.schema';
 import { Role } from './../generated/prisma/enums';
 
 describe('BatchModule (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let activityLogModel: Model<BatchActivityLogDocument>;
   const createdUserIds: string[] = [];
   const createdCropIds: string[] = [];
   const createdVarietyIds: string[] = [];
@@ -120,10 +127,14 @@ describe('BatchModule (e2e)', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
+    activityLogModel = app.get(getModelToken(BatchActivityLog.name));
   });
 
   afterAll(async () => {
     if (createdBatchIds.length > 0) {
+      await activityLogModel.deleteMany({
+        batchId: { $in: createdBatchIds },
+      });
       await prisma.batchMilestoneProgress.deleteMany({
         where: { batchId: { in: createdBatchIds } },
       });
@@ -340,6 +351,74 @@ describe('BatchModule (e2e)', () => {
         .get(`/batches/${batch.id}`)
         .set('Authorization', `Bearer ${setupB.token}`)
         .expect(404);
+    });
+  });
+
+  describe('POST /batches/:id/activity', () => {
+    it('returns 401 without a token', async () => {
+      await request(app.getHttpServer())
+        .post('/batches/00000000-0000-0000-0000-000000000000/activity')
+        .send({ note: 'irrelevant' })
+        .expect(401);
+    });
+
+    it('returns 404 for a batch not owned by the requesting Grower', async () => {
+      const setupA = await createFullSetup('activity-notowned-a');
+      const setupB = await createFullSetup('activity-notowned-b');
+      const batch = await createBatchViaApi(
+        setupB.token,
+        setupB.crop,
+        setupB.variety,
+        setupB.cycle,
+      );
+
+      await request(app.getHttpServer())
+        .post(`/batches/${batch.id}/activity`)
+        .set('Authorization', `Bearer ${setupA.token}`)
+        .send({ note: 'irrelevant' })
+        .expect(404);
+    });
+
+    it('logs a freeform note and it shows up embedded in GET /batches/:id, in chronological order', async () => {
+      const setup = await createFullSetup('activity-happy');
+      const batch = await createBatchViaApi(
+        setup.token,
+        setup.crop,
+        setup.variety,
+        setup.cycle,
+      );
+
+      const first = await request(app.getHttpServer())
+        .post(`/batches/${batch.id}/activity`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({ note: 'Seedlings looking healthy' })
+        .expect(201);
+      expect((first.body as { note: string }).note).toBe(
+        'Seedlings looking healthy',
+      );
+
+      await request(app.getHttpServer())
+        .post(`/batches/${batch.id}/activity`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({
+          note: 'Noticed some pest damage',
+          photos: ['https://example.com/pest.jpg'],
+        })
+        .expect(201);
+
+      const res = await request(app.getHttpServer())
+        .get(`/batches/${batch.id}`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .expect(200);
+      const body = res.body as {
+        activityLog: Array<{ note: string; photos: string[] }>;
+      };
+      expect(body.activityLog).toHaveLength(2);
+      expect(body.activityLog[0].note).toBe('Seedlings looking healthy');
+      expect(body.activityLog[1]).toMatchObject({
+        note: 'Noticed some pest damage',
+        photos: ['https://example.com/pest.jpg'],
+      });
     });
   });
 

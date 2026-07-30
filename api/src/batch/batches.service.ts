@@ -3,14 +3,25 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBatchDto } from './dto/create-batch.dto';
 import { AdvanceMilestoneDto } from './dto/advance-milestone.dto';
 import { ConfirmHarvestDto } from './dto/confirm-harvest.dto';
+import { CreateActivityLogDto } from './dto/create-activity-log.dto';
+import {
+  BatchActivityLog,
+  BatchActivityLogDocument,
+} from './schemas/batch-activity-log.schema';
 
 @Injectable()
 export class BatchesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @InjectModel(BatchActivityLog.name)
+    private readonly activityLogModel: Model<BatchActivityLogDocument>,
+  ) {}
 
   async create(userId: string, dto: CreateBatchDto) {
     const crop = await this.prisma.crop.findFirst({
@@ -78,7 +89,27 @@ export class BatchesService {
     if (!batch) {
       throw new NotFoundException('Batch not found');
     }
-    return batch;
+
+    const activityLog = await this.activityLogModel
+      .find({ batchId: id })
+      .sort({ loggedAt: 1 });
+
+    return { ...batch, activityLog };
+  }
+
+  async addActivity(userId: string, id: string, dto: CreateActivityLogDto) {
+    const batch = await this.prisma.batch.findFirst({
+      where: { id, ownerId: userId },
+    });
+    if (!batch) {
+      throw new NotFoundException('Batch not found');
+    }
+
+    return this.activityLogModel.create({
+      batchId: id,
+      note: dto.note,
+      photos: dto.photos ?? [],
+    });
   }
 
   async advanceMilestone(userId: string, id: string, dto: AdvanceMilestoneDto) {

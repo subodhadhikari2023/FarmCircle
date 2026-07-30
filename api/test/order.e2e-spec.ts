@@ -1,11 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
+import {
+  OrderStatusHistory,
+  OrderStatusHistoryDocument,
+} from './../src/order/schemas/order-status-history.schema';
 import {
   DeliveryMethod,
   OrderStatus,
@@ -16,6 +22,7 @@ import {
 describe('OrderModule (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let historyModel: Model<OrderStatusHistoryDocument>;
   const createdUserIds: string[] = [];
   const createdCropIds: string[] = [];
   const createdVarietyIds: string[] = [];
@@ -146,10 +153,14 @@ describe('OrderModule (e2e)', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
+    historyModel = app.get(getModelToken(OrderStatusHistory.name));
   });
 
   afterAll(async () => {
     if (createdOrderIds.length > 0) {
+      await historyModel.deleteMany({
+        orderId: { $in: createdOrderIds },
+      });
       await prisma.order.deleteMany({
         where: { id: { in: createdOrderIds } },
       });
@@ -507,6 +518,48 @@ describe('OrderModule (e2e)', () => {
         .patch(`/orders/${order.id}/status`)
         .set('Authorization', `Bearer ${token}`)
         .expect(409);
+    });
+  });
+
+  describe('OrderStatusHistory (Mongo)', () => {
+    it('logs a PLACED entry on creation and a CONFIRMED entry on advance, returned chronologically on GET /orders/:id', async () => {
+      const grower = await createUser(Role.GROWER, 'history-grower');
+      const customer = await createUser(Role.CUSTOMER, 'history-cust');
+      const growerToken = await loginAndGetToken(grower.email);
+      const customerToken = await loginAndGetToken(customer.email);
+      const crop = await createCrop(grower.id, 'Mint');
+      const variety = await createVariety(crop.id, 'Spearmint');
+      const listing = await createListing(grower.id, crop.id, variety.id);
+
+      const createRes = await request(app.getHttpServer())
+        .post('/orders')
+        .set('Authorization', `Bearer ${customerToken}`)
+        .send(pickupBody(listing.id, 2))
+        .expect(201);
+      const orderId = (createRes.body as { id: string }).id;
+      createdOrderIds.push(orderId);
+
+      await request(app.getHttpServer())
+        .patch(`/orders/${orderId}/status`)
+        .set('Authorization', `Bearer ${growerToken}`)
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .get(`/orders/${orderId}`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(200);
+      const body = res.body as {
+        statusHistory: Array<{ status: string; changedBy: string }>;
+      };
+      expect(body.statusHistory).toHaveLength(2);
+      expect(body.statusHistory[0]).toMatchObject({
+        status: OrderStatus.PLACED,
+        changedBy: customer.id,
+      });
+      expect(body.statusHistory[1]).toMatchObject({
+        status: OrderStatus.CONFIRMED,
+        changedBy: grower.id,
+      });
     });
   });
 

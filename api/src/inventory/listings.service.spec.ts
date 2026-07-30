@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
 import { ListingsService } from './listings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListingContent } from './schemas/listing-content.schema';
 import { Role } from 'generated/prisma/enums';
 
 describe('ListingsService', () => {
@@ -25,13 +27,35 @@ describe('ListingsService', () => {
     },
   };
 
+  const mockContentModel = {
+    create: jest.fn(),
+    find: jest.fn(),
+    findOne: jest.fn(),
+    findOneAndUpdate: jest.fn(),
+  };
+
+  const noContent = {
+    description: undefined,
+    images: [],
+    isOrganicCertified: false,
+    attributes: undefined,
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockContentModel.create.mockResolvedValue(null);
+    mockContentModel.find.mockResolvedValue([]);
+    mockContentModel.findOne.mockResolvedValue(null);
+    mockContentModel.findOneAndUpdate.mockResolvedValue(null);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ListingsService,
         { provide: PrismaService, useValue: mockPrismaService },
+        {
+          provide: getModelToken(ListingContent.name),
+          useValue: mockContentModel,
+        },
       ],
     }).compile();
 
@@ -54,7 +78,7 @@ describe('ListingsService', () => {
       availableQuantity: 100,
     };
 
-    it('creates a direct-path listing that is published immediately', async () => {
+    it('creates a direct-path listing that is published immediately, with an empty Mongo content doc', async () => {
       mockPrismaService.crop.findFirst.mockResolvedValue({
         id: 'crop1',
         ownerId: 'u1',
@@ -65,6 +89,10 @@ describe('ListingsService', () => {
       });
       const created = { id: 'l1', ownerId: 'u1', ...dto };
       mockPrismaService.listing.create.mockResolvedValue(created);
+      mockContentModel.create.mockResolvedValue({
+        listingId: 'l1',
+        ...noContent,
+      });
 
       const result = await service.create('u1', dto);
 
@@ -90,7 +118,45 @@ describe('ListingsService', () => {
           isPublished: true,
         },
       });
-      expect(result).toEqual(created);
+      expect(mockContentModel.create).toHaveBeenCalledWith({
+        listingId: 'l1',
+        description: undefined,
+        images: [],
+        isOrganicCertified: false,
+        attributes: undefined,
+      });
+      expect(result).toEqual({ ...created, ...noContent });
+    });
+
+    it('persists description/images/isOrganicCertified/attributes to Mongo when provided', async () => {
+      mockPrismaService.crop.findFirst.mockResolvedValue({
+        id: 'crop1',
+        ownerId: 'u1',
+      });
+      mockPrismaService.variety.findFirst.mockResolvedValue({
+        id: 'variety1',
+        cropId: 'crop1',
+      });
+      const created = { id: 'l1', ownerId: 'u1', ...dto };
+      mockPrismaService.listing.create.mockResolvedValue(created);
+      const contentDto = {
+        description: 'Fresh organic tomatoes',
+        images: ['https://example.com/a.jpg'],
+        isOrganicCertified: true,
+        attributes: { color: 'red' },
+      };
+      mockContentModel.create.mockResolvedValue({
+        listingId: 'l1',
+        ...contentDto,
+      });
+
+      const result = await service.create('u1', { ...dto, ...contentDto });
+
+      expect(mockContentModel.create).toHaveBeenCalledWith({
+        listingId: 'l1',
+        ...contentDto,
+      });
+      expect(result).toEqual({ ...created, ...contentDto });
     });
 
     it('throws NotFoundException when the crop does not exist or is not owned by the user', async () => {
@@ -135,14 +201,32 @@ describe('ListingsService', () => {
       expect(mockPrismaService.listing.findMany).toHaveBeenCalledWith({
         where: { isPublished: true, isClosed: false },
       });
+      expect(mockContentModel.find).toHaveBeenCalledWith({
+        listingId: { $in: ['l1'] },
+      });
     });
 
-    it('includes wholesale pricing for an authenticated Vendor', async () => {
+    it('includes wholesale pricing for an authenticated Vendor, merged with Mongo content', async () => {
       mockPrismaService.listing.findMany.mockResolvedValue([listing]);
+      mockContentModel.find.mockResolvedValue([
+        {
+          listingId: 'l1',
+          description: 'Ripe',
+          images: [],
+          isOrganicCertified: true,
+          attributes: undefined,
+        },
+      ]);
 
       const result = await service.findPublished(Role.VENDOR);
 
-      expect(result[0]).toEqual(listing);
+      expect(result[0]).toEqual({
+        ...listing,
+        description: 'Ripe',
+        images: [],
+        isOrganicCertified: true,
+        attributes: undefined,
+      });
     });
 
     it('strips wholesale pricing for anyone who is not a Vendor', async () => {
@@ -174,7 +258,7 @@ describe('ListingsService', () => {
       isPublished: true,
     };
 
-    it('returns the listing with wholesale pricing for a Vendor', async () => {
+    it('returns the listing merged with its Mongo content, with wholesale pricing for a Vendor', async () => {
       mockPrismaService.listing.findFirst.mockResolvedValue(listing);
 
       const result = await service.findOnePublic('l1', Role.VENDOR);
@@ -182,7 +266,10 @@ describe('ListingsService', () => {
       expect(mockPrismaService.listing.findFirst).toHaveBeenCalledWith({
         where: { id: 'l1', isPublished: true },
       });
-      expect(result).toEqual(listing);
+      expect(mockContentModel.findOne).toHaveBeenCalledWith({
+        listingId: 'l1',
+      });
+      expect(result).toEqual({ ...listing, ...noContent });
     });
 
     it('strips wholesale pricing for an unauthenticated request', async () => {
@@ -200,6 +287,7 @@ describe('ListingsService', () => {
       await expect(service.findOnePublic('l1', Role.VENDOR)).rejects.toThrow(
         NotFoundException,
       );
+      expect(mockContentModel.findOne).not.toHaveBeenCalled();
     });
   });
 
@@ -220,7 +308,7 @@ describe('ListingsService', () => {
   });
 
   describe('update', () => {
-    it("updates the listing's available quantity", async () => {
+    it("updates the listing's available quantity, leaving Mongo content untouched when no content fields are given", async () => {
       const listing = { id: 'l1', ownerId: 'u1', availableQuantity: 100 };
       mockPrismaService.listing.findFirst.mockResolvedValue(listing);
       const updated = { ...listing, availableQuantity: 80 };
@@ -237,7 +325,44 @@ describe('ListingsService', () => {
         where: { id: 'l1' },
         data: { availableQuantity: 80 },
       });
-      expect(result).toEqual(updated);
+      expect(mockContentModel.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(mockContentModel.findOne).toHaveBeenCalledWith({
+        listingId: 'l1',
+      });
+      expect(result).toEqual({ ...updated, ...noContent });
+    });
+
+    it('upserts content fields to Mongo when provided', async () => {
+      const listing = { id: 'l1', ownerId: 'u1', availableQuantity: 100 };
+      mockPrismaService.listing.findFirst.mockResolvedValue(listing);
+      mockPrismaService.listing.update.mockResolvedValue(listing);
+      mockContentModel.findOneAndUpdate.mockResolvedValue({
+        listingId: 'l1',
+        description: 'Fresh organic apples',
+        images: [],
+        isOrganicCertified: true,
+        attributes: undefined,
+      });
+
+      const result = await service.update('u1', 'l1', {
+        description: 'Fresh organic apples',
+        isOrganicCertified: true,
+      });
+
+      expect(mockContentModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { listingId: 'l1' },
+        {
+          $set: {
+            description: 'Fresh organic apples',
+            isOrganicCertified: true,
+          },
+        },
+        { upsert: true, returnDocument: 'after' },
+      );
+      expect(result).toMatchObject({
+        description: 'Fresh organic apples',
+        isOrganicCertified: true,
+      });
     });
 
     it('throws NotFoundException when the listing does not exist or is not owned by the user', async () => {
