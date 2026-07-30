@@ -14,6 +14,7 @@ import { BatchesService } from './batches.service';
 import { CreateBatchDto } from './dto/create-batch.dto';
 import { AdvanceMilestoneDto } from './dto/advance-milestone.dto';
 import { ConfirmHarvestDto } from './dto/confirm-harvest.dto';
+import { CreateActivityLogDto } from './dto/create-activity-log.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -67,5 +68,14 @@ export class BatchesController {
     @Body() dto: ConfirmHarvestDto,
   ) {
     return this.batchesService.confirmHarvest(this.requireUserId(req), id, dto);
+  }
+
+  @Post(':id/activity')
+  addActivity(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: CreateActivityLogDto,
+  ) {
+    return this.batchesService.addActivity(this.requireUserId(req), id, dto);
   }
 }

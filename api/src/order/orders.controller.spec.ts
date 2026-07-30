@@ -124,14 +124,21 @@ describe('OrdersController', () => {
   });
 
   describe('dispute', () => {
-    it('delegates to ordersService.dispute with the id param and dto', async () => {
+    it("delegates to ordersService.dispute with the authenticated admin's id, the id param, and dto", async () => {
+      const adminRequest = {
+        user: { id: 'admin1', role: Role.ADMIN },
+      } as unknown as Request;
       const dto = { status: OrderStatus.CANCELLED };
       const order = { id: 'o1', status: OrderStatus.CANCELLED };
       mockOrdersService.dispute.mockResolvedValue(order);
 
-      const result = await controller.dispute('o1', dto);
+      const result = await controller.dispute(adminRequest, 'o1', dto);
 
-      expect(mockOrdersService.dispute).toHaveBeenCalledWith('o1', dto);
+      expect(mockOrdersService.dispute).toHaveBeenCalledWith(
+        'admin1',
+        'o1',
+        dto,
+      );
       expect(result).toEqual(order);
     });
   });

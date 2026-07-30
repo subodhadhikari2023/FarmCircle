@@ -60,8 +60,13 @@ export class OrdersController {
 
   @Patch(':id/dispute')
   @Roles(Role.ADMIN)
-  dispute(@Param('id') id: string, @Body() dto: DisputeOrderDto) {
-    return this.ordersService.dispute(id, dto);
+  dispute(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: DisputeOrderDto,
+  ) {
+    const user = this.requireUser(req);
+    return this.ordersService.dispute(user.id, id, dto);
   }
 
   @Patch(':id/cancel')
