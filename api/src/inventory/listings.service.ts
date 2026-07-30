@@ -8,6 +8,7 @@ import { Model } from 'mongoose';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
+import { SetListingTermsDto } from './dto/set-listing-terms.dto';
 import { Role } from 'generated/prisma/enums';
 import type { Listing } from 'generated/prisma/client';
 import {
@@ -92,12 +93,75 @@ export class ListingsService {
     return this.applyVisibility(this.mergeContent(listing, content), role);
   }
 
-  getUpcoming() {
-    return this.prisma.batch.findMany({
-      where: { harvestConfirmed: false },
-      include: { crop: true, variety: true },
+  async createDraftFromBatch(
+    userId: string,
+    batchId: string,
+    dto: SetListingTermsDto,
+  ) {
+    const batch = await this.prisma.batch.findFirst({
+      where: { id: batchId, ownerId: userId },
+      include: { milestoneProgress: true },
+    });
+    if (!batch) {
+      throw new NotFoundException('Batch not found');
+    }
+
+    const finalOrder = batch.milestoneProgress.reduce(
+      (max, progress) => Math.max(max, progress.order),
+      0,
+    );
+    if (batch.currentMilestoneOrder < finalOrder) {
+      throw new ConflictException(
+        'Batch has not reached its final milestone yet',
+      );
+    }
+
+    const existing = await this.prisma.listing.findFirst({
+      where: { batchId },
+    });
+    if (existing) {
+      throw new ConflictException('Listing already exists for this batch');
+    }
+
+    const listing = await this.prisma.listing.create({
+      data: {
+        ownerId: userId,
+        cropId: batch.cropId,
+        varietyId: batch.varietyId,
+        batchId: batch.id,
+        hasTrackedCycle: true,
+        retailPrice: dto.retailPrice,
+        wholesalePrice: dto.wholesalePrice,
+        minWholesaleQty: dto.minWholesaleQty,
+        retailCeilingPercent: dto.retailCeilingPercent,
+        preBookablePercent: dto.preBookablePercent,
+        availableQuantity: 0,
+        isPublished: false,
+      },
+    });
+
+    const content = await this.contentModel.create({
+      listingId: listing.id,
+      description: dto.description,
+      images: dto.images ?? [],
+      isOrganicCertified: dto.isOrganicCertified ?? false,
+      attributes: dto.attributes,
+    });
+
+    return this.mergeContent(listing, content);
+  }
+
+  async getUpcoming() {
+    const listings = await this.prisma.listing.findMany({
+      where: { hasTrackedCycle: true, isPublished: false, isClosed: false },
       orderBy: { createdAt: 'asc' },
     });
+    const contentByListingId = await this.getContentMap(
+      listings.map((listing) => listing.id),
+    );
+    return listings.map((listing) =>
+      this.mergeContent(listing, contentByListingId.get(listing.id) ?? null),
+    );
   }
 
   async update(userId: string, id: string, dto: UpdateListingDto) {

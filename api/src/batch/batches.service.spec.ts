@@ -3,7 +3,11 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { BatchesService } from './batches.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { BatchActivityLog } from './schemas/batch-activity-log.schema';
+import { PreBookingStatus } from 'generated/prisma/enums';
+
+const decimal = (n: number) => ({ toNumber: () => n });
 
 describe('BatchesService', () => {
   let service: BatchesService;
@@ -30,7 +34,19 @@ describe('BatchesService', () => {
       findFirst: jest.fn(),
       update: jest.fn(),
     },
+    listing: {
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+    preBooking: {
+      findMany: jest.fn(),
+      update: jest.fn(),
+    },
     $transaction: jest.fn(),
+  };
+
+  const mockRedisService = {
+    setPaymentHold: jest.fn(),
   };
 
   const mockActivityLogModel = {
@@ -52,6 +68,7 @@ describe('BatchesService', () => {
       providers: [
         BatchesService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: RedisService, useValue: mockRedisService },
         {
           provide: getModelToken(BatchActivityLog.name),
           useValue: mockActivityLogModel,
@@ -376,7 +393,15 @@ describe('BatchesService', () => {
   });
 
   describe('confirmHarvest', () => {
-    it('confirms the harvest once the batch has reached its final milestone', async () => {
+    beforeEach(() => {
+      mockPrismaService.$transaction.mockImplementation(
+        (cb: (tx: typeof mockPrismaService) => unknown) =>
+          cb(mockPrismaService),
+      );
+      mockPrismaService.preBooking.findMany.mockResolvedValue([]);
+    });
+
+    it('confirms the harvest, publishing the draft Listing with the actual yield', async () => {
       const batch = {
         id: 'b1',
         ownerId: 'u1',
@@ -385,6 +410,10 @@ describe('BatchesService', () => {
         milestoneProgress: [{ order: 1 }, { order: 2 }],
       };
       mockPrismaService.batch.findFirst.mockResolvedValue(batch);
+      mockPrismaService.listing.findFirst.mockResolvedValue({
+        id: 'l1',
+        batchId: 'b1',
+      });
       const updated = {
         ...batch,
         actualYield: 75,
@@ -396,11 +425,79 @@ describe('BatchesService', () => {
         actualYield: 75,
       });
 
+      expect(mockPrismaService.listing.findFirst).toHaveBeenCalledWith({
+        where: { batchId: 'b1' },
+      });
       expect(mockPrismaService.batch.update).toHaveBeenCalledWith({
         where: { id: 'b1' },
         data: { actualYield: 75, harvestConfirmed: true },
       });
+      expect(mockPrismaService.listing.update).toHaveBeenCalledWith({
+        where: { id: 'l1' },
+        data: { availableQuantity: 75, isPublished: true },
+      });
       expect(result).toEqual(updated);
+    });
+
+    it('transitions QUEUED pre-bookings to AWAITING_PAYMENT with a 20% advance and a 48h Redis hold', async () => {
+      const batch = {
+        id: 'b1',
+        ownerId: 'u1',
+        currentMilestoneOrder: 2,
+        harvestConfirmed: false,
+        milestoneProgress: [{ order: 1 }, { order: 2 }],
+      };
+      mockPrismaService.batch.findFirst.mockResolvedValue(batch);
+      mockPrismaService.listing.findFirst.mockResolvedValue({
+        id: 'l1',
+        batchId: 'b1',
+        wholesalePrice: decimal(35),
+      });
+      mockPrismaService.batch.update.mockResolvedValue({
+        ...batch,
+        actualYield: 75,
+        harvestConfirmed: true,
+      });
+      const queuedPreBooking = { id: 'pb1', quantity: decimal(20) };
+      mockPrismaService.preBooking.findMany.mockResolvedValue([
+        queuedPreBooking,
+      ]);
+
+      await service.confirmHarvest('u1', 'b1', { actualYield: 75 });
+
+      expect(mockPrismaService.preBooking.findMany).toHaveBeenCalledWith({
+        where: { batchId: 'b1', status: PreBookingStatus.QUEUED },
+      });
+      expect(mockPrismaService.preBooking.update).toHaveBeenCalledWith({
+        where: { id: 'pb1' },
+        data: {
+          status: PreBookingStatus.AWAITING_PAYMENT,
+          listingId: 'l1',
+          advanceAmount: 140,
+          holdExpiresAt: expect.any(Date) as Date,
+        },
+      });
+      expect(mockRedisService.setPaymentHold).toHaveBeenCalledWith(
+        'pb1',
+        48 * 60 * 60,
+      );
+    });
+
+    it('throws ConflictException when no draft Listing exists for the batch', async () => {
+      const batch = {
+        id: 'b1',
+        ownerId: 'u1',
+        currentMilestoneOrder: 2,
+        harvestConfirmed: false,
+        milestoneProgress: [{ order: 1 }, { order: 2 }],
+      };
+      mockPrismaService.batch.findFirst.mockResolvedValue(batch);
+      mockPrismaService.listing.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.confirmHarvest('u1', 'b1', { actualYield: 75 }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrismaService.batch.update).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when the batch does not exist or is not owned by the user', async () => {

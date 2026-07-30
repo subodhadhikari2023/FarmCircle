@@ -23,7 +23,7 @@ describe('ListingsService', () => {
       update: jest.fn(),
     },
     batch: {
-      findMany: jest.fn(),
+      findFirst: jest.fn(),
     },
   };
 
@@ -292,18 +292,36 @@ describe('ListingsService', () => {
   });
 
   describe('getUpcoming', () => {
-    it('returns batches that have not yet had their harvest confirmed', async () => {
-      const batches = [{ id: 'b1', harvestConfirmed: false }];
-      mockPrismaService.batch.findMany.mockResolvedValue(batches);
+    it('returns unpublished tracked draft listings, merged with Mongo content', async () => {
+      const listing = {
+        id: 'l1',
+        hasTrackedCycle: true,
+        isPublished: false,
+        isClosed: false,
+      };
+      mockPrismaService.listing.findMany.mockResolvedValue([listing]);
+      mockContentModel.find.mockResolvedValue([
+        { listingId: 'l1', description: 'Growing well', images: [] },
+      ]);
 
       const result = await service.getUpcoming();
 
-      expect(mockPrismaService.batch.findMany).toHaveBeenCalledWith({
-        where: { harvestConfirmed: false },
-        include: { crop: true, variety: true },
+      expect(mockPrismaService.listing.findMany).toHaveBeenCalledWith({
+        where: { hasTrackedCycle: true, isPublished: false, isClosed: false },
         orderBy: { createdAt: 'asc' },
       });
-      expect(result).toEqual(batches);
+      expect(mockContentModel.find).toHaveBeenCalledWith({
+        listingId: { $in: ['l1'] },
+      });
+      expect(result).toEqual([
+        {
+          ...listing,
+          description: 'Growing well',
+          images: [],
+          isOrganicCertified: false,
+          attributes: undefined,
+        },
+      ]);
     });
   });
 
@@ -412,6 +430,114 @@ describe('ListingsService', () => {
         ConflictException,
       );
       expect(mockPrismaService.listing.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createDraftFromBatch', () => {
+    const dto = {
+      retailPrice: 50,
+      wholesalePrice: 35,
+      minWholesaleQty: 15,
+      retailCeilingPercent: 10,
+      preBookablePercent: 60,
+    };
+
+    const batchAtFinalMilestone = {
+      id: 'b1',
+      ownerId: 'u1',
+      cropId: 'crop1',
+      varietyId: 'variety1',
+      currentMilestoneOrder: 2,
+      milestoneProgress: [{ order: 1 }, { order: 2 }],
+    };
+
+    it('creates an unpublished tracked listing with an empty Mongo content doc', async () => {
+      mockPrismaService.batch.findFirst.mockResolvedValue(
+        batchAtFinalMilestone,
+      );
+      mockPrismaService.listing.findFirst.mockResolvedValue(null);
+      const created = {
+        id: 'l1',
+        ownerId: 'u1',
+        cropId: 'crop1',
+        varietyId: 'variety1',
+        batchId: 'b1',
+        hasTrackedCycle: true,
+        isPublished: false,
+        ...dto,
+      };
+      mockPrismaService.listing.create.mockResolvedValue(created);
+      mockContentModel.create.mockResolvedValue({
+        listingId: 'l1',
+        ...noContent,
+      });
+
+      const result = await service.createDraftFromBatch('u1', 'b1', dto);
+
+      expect(mockPrismaService.batch.findFirst).toHaveBeenCalledWith({
+        where: { id: 'b1', ownerId: 'u1' },
+        include: { milestoneProgress: true },
+      });
+      expect(mockPrismaService.listing.findFirst).toHaveBeenCalledWith({
+        where: { batchId: 'b1' },
+      });
+      expect(mockPrismaService.listing.create).toHaveBeenCalledWith({
+        data: {
+          ownerId: 'u1',
+          cropId: 'crop1',
+          varietyId: 'variety1',
+          batchId: 'b1',
+          hasTrackedCycle: true,
+          retailPrice: 50,
+          wholesalePrice: 35,
+          minWholesaleQty: 15,
+          retailCeilingPercent: 10,
+          preBookablePercent: 60,
+          availableQuantity: 0,
+          isPublished: false,
+        },
+      });
+      expect(mockContentModel.create).toHaveBeenCalledWith({
+        listingId: 'l1',
+        description: undefined,
+        images: [],
+        isOrganicCertified: false,
+        attributes: undefined,
+      });
+      expect(result).toEqual({ ...created, ...noContent });
+    });
+
+    it('throws NotFoundException when the batch does not exist or is not owned by the user', async () => {
+      mockPrismaService.batch.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.createDraftFromBatch('u1', 'b1', dto),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrismaService.listing.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when the batch has not reached its final milestone yet', async () => {
+      mockPrismaService.batch.findFirst.mockResolvedValue({
+        ...batchAtFinalMilestone,
+        currentMilestoneOrder: 1,
+      });
+
+      await expect(
+        service.createDraftFromBatch('u1', 'b1', dto),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrismaService.listing.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when a listing already exists for this batch', async () => {
+      mockPrismaService.batch.findFirst.mockResolvedValue(
+        batchAtFinalMilestone,
+      );
+      mockPrismaService.listing.findFirst.mockResolvedValue({ id: 'l0' });
+
+      await expect(
+        service.createDraftFromBatch('u1', 'b1', dto),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrismaService.listing.create).not.toHaveBeenCalled();
     });
   });
 });

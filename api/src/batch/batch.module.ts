@@ -4,6 +4,7 @@ import { BatchesController } from './batches.controller';
 import { BatchTimelineController } from './batch-timeline.controller';
 import { BatchesService } from './batches.service';
 import { PrismaModule } from '../prisma/prisma.module';
+import { RedisModule } from '../redis/redis.module';
 import {
   BatchActivityLog,
   BatchActivityLogSchema,
@@ -12,6 +13,7 @@ import {
 @Module({
   imports: [
     PrismaModule,
+    RedisModule,
     MongooseModule.forFeature([
       { name: BatchActivityLog.name, schema: BatchActivityLogSchema },
     ]),

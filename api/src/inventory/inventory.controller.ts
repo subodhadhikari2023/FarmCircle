@@ -12,6 +12,7 @@ import type { Request } from 'express';
 import { ListingsService } from './listings.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
+import { SetListingTermsDto } from './dto/set-listing-terms.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -47,5 +48,18 @@ export class InventoryController {
   @Patch(':id/close')
   close(@Req() req: Request, @Param('id') id: string) {
     return this.listingsService.close(this.requireUserId(req), id);
+  }
+
+  @Post('from-batch/:batchId')
+  createDraftFromBatch(
+    @Req() req: Request,
+    @Param('batchId') batchId: string,
+    @Body() dto: SetListingTermsDto,
+  ) {
+    return this.listingsService.createDraftFromBatch(
+      this.requireUserId(req),
+      batchId,
+      dto,
+    );
   }
 }
