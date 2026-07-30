@@ -6,6 +6,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { CreateBatchDto } from './dto/create-batch.dto';
 import { AdvanceMilestoneDto } from './dto/advance-milestone.dto';
 import { ConfirmHarvestDto } from './dto/confirm-harvest.dto';
@@ -14,11 +15,15 @@ import {
   BatchActivityLog,
   BatchActivityLogDocument,
 } from './schemas/batch-activity-log.schema';
+import { PreBookingStatus } from 'generated/prisma/enums';
+
+const PAYMENT_HOLD_SECONDS = 48 * 60 * 60;
 
 @Injectable()
 export class BatchesService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
     @InjectModel(BatchActivityLog.name)
     private readonly activityLogModel: Model<BatchActivityLogDocument>,
   ) {}
@@ -163,10 +168,61 @@ export class BatchesService {
       );
     }
 
-    return this.prisma.batch.update({
-      where: { id },
-      data: { actualYield: dto.actualYield, harvestConfirmed: true },
-    });
+    const { updatedBatch, queuedPreBookingIds } =
+      await this.prisma.$transaction(async (tx) => {
+        const listing = await tx.listing.findFirst({
+          where: { batchId: id },
+        });
+        if (!listing) {
+          throw new ConflictException(
+            'Set listing terms before confirming harvest',
+          );
+        }
+
+        const updatedBatch = await tx.batch.update({
+          where: { id },
+          data: { actualYield: dto.actualYield, harvestConfirmed: true },
+        });
+
+        await tx.listing.update({
+          where: { id: listing.id },
+          data: { availableQuantity: dto.actualYield, isPublished: true },
+        });
+
+        const queuedPreBookings = await tx.preBooking.findMany({
+          where: { batchId: id, status: PreBookingStatus.QUEUED },
+        });
+        const holdExpiresAt = new Date(
+          Date.now() + PAYMENT_HOLD_SECONDS * 1000,
+        );
+        for (const preBooking of queuedPreBookings) {
+          await tx.preBooking.update({
+            where: { id: preBooking.id },
+            data: {
+              status: PreBookingStatus.AWAITING_PAYMENT,
+              listingId: listing.id,
+              advanceAmount:
+                preBooking.quantity.toNumber() *
+                listing.wholesalePrice.toNumber() *
+                0.2,
+              holdExpiresAt,
+            },
+          });
+        }
+
+        return {
+          updatedBatch,
+          queuedPreBookingIds: queuedPreBookings.map((p) => p.id),
+        };
+      });
+
+    await Promise.all(
+      queuedPreBookingIds.map((preBookingId) =>
+        this.redis.setPaymentHold(preBookingId, PAYMENT_HOLD_SECONDS),
+      ),
+    );
+
+    return updatedBatch;
   }
 
   async getTimeline(id: string) {
