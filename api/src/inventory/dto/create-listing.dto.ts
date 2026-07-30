@@ -1,6 +1,10 @@
 import {
+  IsArray,
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
+  IsObject,
+  IsOptional,
   IsPositive,
   IsString,
   Max,
@@ -41,4 +45,21 @@ export class CreateListingDto {
   @IsNumber()
   @IsPositive()
   availableQuantity: number;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  isOrganicCertified?: boolean;
+
+  @IsOptional()
+  @IsObject()
+  attributes?: Record<string, unknown>;
 }

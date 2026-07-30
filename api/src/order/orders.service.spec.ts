@@ -4,8 +4,10 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { OrderStatusHistory } from './schemas/order-status-history.schema';
 import {
   DeliveryMethod,
   OrderStatus,
@@ -36,13 +38,29 @@ describe('OrdersService', () => {
     $transaction: jest.fn(),
   };
 
+  const mockHistoryModel = {
+    create: jest.fn(),
+    find: jest.fn(),
+  };
+
+  function stubHistory(entries: unknown[] = []) {
+    const sort = jest.fn().mockResolvedValue(entries);
+    mockHistoryModel.find.mockReturnValue({ sort });
+    return sort;
+  }
+
   beforeEach(async () => {
     jest.clearAllMocks();
+    stubHistory();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
         { provide: PrismaService, useValue: mockPrismaService },
+        {
+          provide: getModelToken(OrderStatusHistory.name),
+          useValue: mockHistoryModel,
+        },
       ],
     }).compile();
 
@@ -112,9 +130,14 @@ describe('OrdersService', () => {
       expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
     });
 
-    it('prices a Vendor order at wholesale once quantity meets minWholesaleQty', async () => {
+    it('prices a Vendor order at wholesale once quantity meets minWholesaleQty and logs the initial PLACED status', async () => {
       mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
-      const created = { id: 'o1', unitPrice: 35, totalAmount: 525 };
+      const created = {
+        id: 'o1',
+        status: OrderStatus.PLACED,
+        unitPrice: 35,
+        totalAmount: 525,
+      };
       stubTransaction(created, {
         ...baseListing,
         availableQuantity: decimal(85),
@@ -141,12 +164,22 @@ describe('OrdersService', () => {
         where: { id: 'l1' },
         data: { availableQuantity: 85 },
       });
+      expect(mockHistoryModel.create).toHaveBeenCalledWith({
+        orderId: 'o1',
+        status: OrderStatus.PLACED,
+        changedBy: 'vendor1',
+      });
       expect(result).toEqual(created);
     });
 
     it('falls back a Vendor order to retail pricing below minWholesaleQty', async () => {
       mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
-      const created = { id: 'o1', unitPrice: 50, totalAmount: 250 };
+      const created = {
+        id: 'o1',
+        status: OrderStatus.PLACED,
+        unitPrice: 50,
+        totalAmount: 250,
+      };
       stubTransaction(created);
 
       await service.create('vendor1', Role.VENDOR, {
@@ -170,7 +203,12 @@ describe('OrdersService', () => {
 
     it('always prices a Customer order at retail', async () => {
       mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
-      const created = { id: 'o1', unitPrice: 50, totalAmount: 800 };
+      const created = {
+        id: 'o1',
+        status: OrderStatus.PLACED,
+        unitPrice: 50,
+        totalAmount: 800,
+      };
       stubTransaction(created);
 
       await service.create('customer1', Role.CUSTOMER, {
@@ -207,7 +245,7 @@ describe('OrdersService', () => {
 
     it('allows a Vendor order above the retail ceiling threshold (ceiling only applies to Customers)', async () => {
       mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
-      const created = { id: 'o1' };
+      const created = { id: 'o1', status: OrderStatus.PLACED };
       stubTransaction(created);
 
       await expect(
@@ -235,7 +273,7 @@ describe('OrdersService', () => {
         id: 'addr1',
         userId: 'customer1',
       });
-      const created = { id: 'o1' };
+      const created = { id: 'o1', status: OrderStatus.PLACED };
       stubTransaction(created);
 
       await service.create('customer1', Role.CUSTOMER, {
@@ -306,22 +344,27 @@ describe('OrdersService', () => {
       );
     });
 
-    it('returns the order for its own buyer', async () => {
+    it('returns the order merged with its chronological status history for its own buyer', async () => {
       const order = { id: 'o1', buyerId: 'u1' };
       mockPrismaService.order.findUnique.mockResolvedValue(order);
+      const history = [{ orderId: 'o1', status: OrderStatus.PLACED }];
+      const sort = stubHistory(history);
 
       const result = await service.findOne('u1', Role.CUSTOMER, 'o1');
 
-      expect(result).toEqual(order);
+      expect(mockHistoryModel.find).toHaveBeenCalledWith({ orderId: 'o1' });
+      expect(sort).toHaveBeenCalledWith({ changedAt: 1 });
+      expect(result).toEqual({ ...order, statusHistory: history });
     });
 
     it('returns any order for an Admin regardless of buyer', async () => {
       const order = { id: 'o1', buyerId: 'someoneElse' };
       mockPrismaService.order.findUnique.mockResolvedValue(order);
+      stubHistory([]);
 
       const result = await service.findOne('admin1', Role.ADMIN, 'o1');
 
-      expect(result).toEqual(order);
+      expect(result).toEqual({ ...order, statusHistory: [] });
     });
   });
 
@@ -334,7 +377,7 @@ describe('OrdersService', () => {
       );
     });
 
-    it('advances PLACED to CONFIRMED', async () => {
+    it('advances PLACED to CONFIRMED and logs the change', async () => {
       mockPrismaService.order.findUnique.mockResolvedValue({
         id: 'o1',
         status: OrderStatus.PLACED,
@@ -349,6 +392,11 @@ describe('OrdersService', () => {
       expect(mockPrismaService.order.update).toHaveBeenCalledWith({
         where: { id: 'o1' },
         data: { status: OrderStatus.CONFIRMED },
+      });
+      expect(mockHistoryModel.create).toHaveBeenCalledWith({
+        orderId: 'o1',
+        status: OrderStatus.CONFIRMED,
+        changedBy: 'grower1',
       });
       expect(result).toEqual(updated);
     });
@@ -405,6 +453,7 @@ describe('OrdersService', () => {
         ConflictException,
       );
       expect(mockPrismaService.order.update).not.toHaveBeenCalled();
+      expect(mockHistoryModel.create).not.toHaveBeenCalled();
     });
   });
 
@@ -430,7 +479,7 @@ describe('OrdersService', () => {
       expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
     });
 
-    it('cancels a PLACED order and releases its quantity back to the listing', async () => {
+    it('cancels a PLACED order, releases its quantity back to the listing, and logs the change', async () => {
       mockPrismaService.order.findFirst.mockResolvedValue({
         id: 'o1',
         buyerId: 'u1',
@@ -454,6 +503,11 @@ describe('OrdersService', () => {
         where: { id: 'l1' },
         data: { availableQuantity: 100 },
       });
+      expect(mockHistoryModel.create).toHaveBeenCalledWith({
+        orderId: 'o1',
+        status: OrderStatus.CANCELLED,
+        changedBy: 'u1',
+      });
       expect(result).toEqual(updatedOrder);
     });
   });
@@ -463,11 +517,11 @@ describe('OrdersService', () => {
       mockPrismaService.order.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.dispute('o1', { status: OrderStatus.CANCELLED }),
+        service.dispute('admin1', 'o1', { status: OrderStatus.CANCELLED }),
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('force-sets the status without validating the normal transition table', async () => {
+    it('force-sets the status without validating the normal transition table, logging the admin as the changer', async () => {
       mockPrismaService.order.findUnique.mockResolvedValue({
         id: 'o1',
         status: OrderStatus.PLACED,
@@ -478,7 +532,7 @@ describe('OrdersService', () => {
       const updated = { id: 'o1', status: OrderStatus.DELIVERED };
       mockPrismaService.order.update.mockResolvedValue(updated);
 
-      const result = await service.dispute('o1', {
+      const result = await service.dispute('admin1', 'o1', {
         status: OrderStatus.DELIVERED,
       });
 
@@ -487,6 +541,11 @@ describe('OrdersService', () => {
         data: { status: OrderStatus.DELIVERED },
       });
       expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(mockHistoryModel.create).toHaveBeenCalledWith({
+        orderId: 'o1',
+        status: OrderStatus.DELIVERED,
+        changedBy: 'admin1',
+      });
       expect(result).toEqual(updated);
     });
 
@@ -503,7 +562,7 @@ describe('OrdersService', () => {
       const updatedOrder = { id: 'o1', status: OrderStatus.CANCELLED };
       mockPrismaService.$transaction.mockResolvedValue([updatedOrder, {}]);
 
-      const result = await service.dispute('o1', {
+      const result = await service.dispute('admin1', 'o1', {
         status: OrderStatus.CANCELLED,
       });
 
@@ -525,7 +584,7 @@ describe('OrdersService', () => {
       const updated = { id: 'o1', status: OrderStatus.CANCELLED };
       mockPrismaService.order.update.mockResolvedValue(updated);
 
-      await service.dispute('o1', { status: OrderStatus.CANCELLED });
+      await service.dispute('admin1', 'o1', { status: OrderStatus.CANCELLED });
 
       expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
       expect(mockPrismaService.listing.update).not.toHaveBeenCalled();

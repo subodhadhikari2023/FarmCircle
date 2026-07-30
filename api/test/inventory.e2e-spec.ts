@@ -1,16 +1,23 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import cookieParser from 'cookie-parser';
 import * as argon2 from 'argon2';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
+import {
+  ListingContent,
+  ListingContentDocument,
+} from './../src/inventory/schemas/listing-content.schema';
 import { Role } from './../generated/prisma/enums';
 
 describe('InventoryModule (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
+  let contentModel: Model<ListingContentDocument>;
   const createdUserIds: string[] = [];
   const createdCropIds: string[] = [];
   const createdVarietyIds: string[] = [];
@@ -133,10 +140,14 @@ describe('InventoryModule (e2e)', () => {
     await app.init();
 
     prisma = app.get(PrismaService);
+    contentModel = app.get(getModelToken(ListingContent.name));
   });
 
   afterAll(async () => {
     if (createdListingIds.length > 0) {
+      await contentModel.deleteMany({
+        listingId: { $in: createdListingIds },
+      });
       await prisma.listing.deleteMany({
         where: { id: { in: createdListingIds } },
       });
@@ -265,6 +276,41 @@ describe('InventoryModule (e2e)', () => {
       expect(body.isPublished).toBe(true);
       expect(body.hasTrackedCycle).toBe(false);
       expect(body.wholesalePrice).toBeDefined();
+    });
+
+    it('persists description/images/isOrganicCertified/attributes to Mongo and returns them merged', async () => {
+      const grower = await createUser(Role.GROWER, 'create-content');
+      const token = await loginAndGetToken(grower.email);
+      const crop = await createCrop(grower.id, 'Basil');
+      const variety = await createVariety(crop.id, 'Sweet Basil');
+
+      const res = await request(app.getHttpServer())
+        .post('/inventory')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          ...validCreateBody(crop, variety),
+          description: 'Freshly harvested basil',
+          images: ['https://example.com/basil.jpg'],
+          isOrganicCertified: true,
+          attributes: { color: 'green' },
+        })
+        .expect(201);
+
+      const body = res.body as {
+        id: string;
+        description: string;
+        images: string[];
+        isOrganicCertified: boolean;
+        attributes: Record<string, unknown>;
+      };
+      createdListingIds.push(body.id);
+      expect(body.description).toBe('Freshly harvested basil');
+      expect(body.images).toEqual(['https://example.com/basil.jpg']);
+      expect(body.isOrganicCertified).toBe(true);
+      expect(body.attributes).toEqual({ color: 'green' });
+
+      const stored = await contentModel.findOne({ listingId: body.id });
+      expect(stored?.description).toBe('Freshly harvested basil');
     });
   });
 
@@ -418,6 +464,30 @@ describe('InventoryModule (e2e)', () => {
       expect(
         (res.body as { availableQuantity: string }).availableQuantity,
       ).toBe('42');
+    });
+
+    it('upserts description/isOrganicCertified into Mongo for a listing with no prior content doc', async () => {
+      const grower = await createUser(Role.GROWER, 'patch-content-grower');
+      const token = await loginAndGetToken(grower.email);
+      const crop = await createCrop(grower.id, 'Coriander');
+      const variety = await createVariety(crop.id, 'Fresh Coriander');
+      const listing = await createListing(grower.id, crop.id, variety.id);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/inventory/${listing.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ description: 'Locally grown', isOrganicCertified: true })
+        .expect(200);
+
+      const body = res.body as {
+        description: string;
+        isOrganicCertified: boolean;
+      };
+      expect(body.description).toBe('Locally grown');
+      expect(body.isOrganicCertified).toBe(true);
+
+      const stored = await contentModel.findOne({ listingId: listing.id });
+      expect(stored?.description).toBe('Locally grown');
     });
 
     it('returns 400 when attempting to edit a locked price field', async () => {
