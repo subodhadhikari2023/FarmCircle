@@ -45,6 +45,10 @@ describe('PaymentsService', () => {
     order: {
       create: jest.fn(),
     },
+    orderIntent: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
 
@@ -393,6 +397,238 @@ describe('PaymentsService', () => {
       });
       expect(mockRedisService.clearPaymentHold).toHaveBeenCalledWith('pb1');
       expect(result).toEqual({ received: true });
+    });
+
+    it('acks idempotently when an order-intent Payment has already been converted to an Order', async () => {
+      const body = buildBody('order_direct', 'pay_direct');
+      mockPrismaService.payment.findFirst.mockResolvedValue({
+        id: 'pay2',
+        orderIntentId: 'oi1',
+        orderId: 'o1',
+        status: PaymentStatus.SUCCESS,
+      });
+
+      const result = await service.handleWebhook(body, sign(body));
+
+      expect(mockPrismaService.orderIntent.findUnique).not.toHaveBeenCalled();
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(result).toEqual({ received: true });
+    });
+
+    it('skips Order creation but still marks the Payment SUCCESS when stock ran out before confirmation', async () => {
+      const body = buildBody('order_direct', 'pay_direct');
+      mockPrismaService.payment.findFirst.mockResolvedValue({
+        id: 'pay2',
+        orderIntentId: 'oi1',
+        orderId: null,
+      });
+      mockPrismaService.orderIntent.findUnique.mockResolvedValue({
+        id: 'oi1',
+        buyerId: 'u1',
+        listingId: 'l1',
+        quantity: decimal(10),
+        unitPrice: decimal(50),
+        totalAmount: decimal(500),
+        deliveryMethod: DeliveryMethod.PICKUP,
+        addressId: null,
+        paymentMethod: PaymentMethod.ONLINE,
+      });
+      mockPrismaService.listing.findUniqueOrThrow.mockResolvedValue({
+        id: 'l1',
+        availableQuantity: decimal(5),
+      });
+
+      const result = await service.handleWebhook(body, sign(body));
+
+      expect(mockPrismaService.payment.update).toHaveBeenCalledWith({
+        where: { id: 'pay2' },
+        data: {
+          razorpayPaymentId: 'pay_direct',
+          status: PaymentStatus.SUCCESS,
+        },
+      });
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(result).toEqual({ received: true });
+    });
+
+    it('converts the OrderIntent into a real Order, decrements stock, and links the Payment', async () => {
+      const body = buildBody('order_direct', 'pay_direct');
+      mockPrismaService.payment.findFirst.mockResolvedValue({
+        id: 'pay2',
+        orderIntentId: 'oi1',
+        orderId: null,
+      });
+      const intent = {
+        id: 'oi1',
+        buyerId: 'u1',
+        listingId: 'l1',
+        quantity: decimal(5),
+        unitPrice: decimal(50),
+        totalAmount: decimal(250),
+        deliveryMethod: DeliveryMethod.PICKUP,
+        addressId: null,
+        paymentMethod: PaymentMethod.ONLINE,
+      };
+      mockPrismaService.orderIntent.findUnique.mockResolvedValue(intent);
+      const listing = { id: 'l1', availableQuantity: decimal(100) };
+      mockPrismaService.listing.findUniqueOrThrow.mockResolvedValue(listing);
+
+      const createdOrder = { id: 'order1', status: 'PLACED' };
+      mockPrismaService.$transaction.mockImplementation(
+        async (cb: (tx: typeof mockPrismaService) => Promise<unknown>) => {
+          mockPrismaService.order.create.mockResolvedValue(createdOrder);
+          return cb(mockPrismaService);
+        },
+      );
+
+      const result = await service.handleWebhook(body, sign(body));
+
+      expect(mockPrismaService.order.create).toHaveBeenCalledWith({
+        data: {
+          buyerId: 'u1',
+          listingId: 'l1',
+          quantity: intent.quantity,
+          unitPrice: intent.unitPrice,
+          totalAmount: intent.totalAmount,
+          deliveryMethod: DeliveryMethod.PICKUP,
+          addressId: null,
+          paymentMethod: PaymentMethod.ONLINE,
+        },
+      });
+      expect(mockPrismaService.payment.update).toHaveBeenCalledWith({
+        where: { id: 'pay2' },
+        data: {
+          razorpayPaymentId: 'pay_direct',
+          status: PaymentStatus.SUCCESS,
+          orderId: 'order1',
+        },
+      });
+      expect(mockPrismaService.listing.update).toHaveBeenCalledWith({
+        where: { id: 'l1' },
+        data: { availableQuantity: 95 },
+      });
+      expect(mockHistoryModel.create).toHaveBeenCalledWith({
+        orderId: 'order1',
+        status: 'PLACED',
+        changedBy: 'u1',
+      });
+      expect(result).toEqual({ received: true });
+    });
+  });
+
+  describe('createOrderIntentPayment', () => {
+    it('creates a Payment row and a Razorpay order for the given order intent', async () => {
+      mockRazorpayClient.createOrder.mockResolvedValue({
+        id: 'order_direct_abc',
+        amount: 25000,
+        currency: 'INR',
+      });
+      mockPrismaService.payment.create.mockResolvedValue({
+        id: 'pay1',
+        orderIntentId: 'oi1',
+        amount: decimal(250),
+        razorpayOrderId: 'order_direct_abc',
+      });
+
+      const result = await service.createOrderIntentPayment('oi1', 250);
+
+      expect(mockRazorpayClient.createOrder).toHaveBeenCalledWith(25000, 'oi1');
+      expect(mockPrismaService.payment.create).toHaveBeenCalledWith({
+        data: {
+          orderIntentId: 'oi1',
+          amount: 250,
+          method: PaymentMethod.ONLINE,
+          status: PaymentStatus.PENDING,
+          razorpayOrderId: 'order_direct_abc',
+        },
+      });
+      expect(result).toEqual({
+        orderIntentId: 'oi1',
+        razorpayOrderId: 'order_direct_abc',
+        amount: 250,
+        currency: 'INR',
+        keyId: 'test-key-id',
+      });
+    });
+  });
+
+  describe('verifyOrderIntentPayment', () => {
+    const dto = {
+      razorpayOrderId: 'order_direct_abc',
+      razorpayPaymentId: 'pay_xyz',
+      razorpaySignature: '',
+    };
+
+    beforeEach(() => {
+      dto.razorpaySignature = createHmac('sha256', KEY_SECRET)
+        .update(`${dto.razorpayOrderId}|${dto.razorpayPaymentId}`)
+        .digest('hex');
+    });
+
+    it('throws NotFoundException when the order intent is not owned by the buyer', async () => {
+      mockPrismaService.orderIntent.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.verifyOrderIntentPayment('u1', 'oi1', dto),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when there is no matching payment intent', async () => {
+      mockPrismaService.orderIntent.findFirst.mockResolvedValue({
+        id: 'oi1',
+        buyerId: 'u1',
+      });
+      mockPrismaService.payment.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.verifyOrderIntentPayment('u1', 'oi1', dto),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when the signature is invalid', async () => {
+      mockPrismaService.orderIntent.findFirst.mockResolvedValue({
+        id: 'oi1',
+        buyerId: 'u1',
+      });
+      mockPrismaService.payment.findUnique.mockResolvedValue({
+        id: 'pay1',
+        razorpayOrderId: 'order_direct_abc',
+      });
+
+      await expect(
+        service.verifyOrderIntentPayment('u1', 'oi1', {
+          ...dto,
+          razorpaySignature: 'tampered',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrismaService.payment.update).not.toHaveBeenCalled();
+    });
+
+    it('marks the Payment SUCCESS when the signature is valid', async () => {
+      mockPrismaService.orderIntent.findFirst.mockResolvedValue({
+        id: 'oi1',
+        buyerId: 'u1',
+      });
+      mockPrismaService.payment.findUnique.mockResolvedValue({
+        id: 'pay1',
+        razorpayOrderId: 'order_direct_abc',
+      });
+      mockPrismaService.payment.update.mockResolvedValue({
+        id: 'pay1',
+        status: PaymentStatus.SUCCESS,
+      });
+
+      const result = await service.verifyOrderIntentPayment('u1', 'oi1', dto);
+
+      expect(mockPrismaService.payment.update).toHaveBeenCalledWith({
+        where: { id: 'pay1' },
+        data: {
+          razorpayPaymentId: dto.razorpayPaymentId,
+          razorpaySignature: dto.razorpaySignature,
+          status: PaymentStatus.SUCCESS,
+        },
+      });
+      expect(result).toEqual({ id: 'pay1', status: PaymentStatus.SUCCESS });
     });
   });
 });

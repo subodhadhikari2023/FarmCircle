@@ -7,9 +7,16 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { PrismaService } from '../prisma/prisma.service';
+import { PaymentsService } from '../payment/payments.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { DisputeOrderDto } from './dto/dispute-order.dto';
-import { DeliveryMethod, OrderStatus, Role } from 'generated/prisma/enums';
+import { VerifyPaymentDto } from '../payment/dto/verify-payment.dto';
+import {
+  DeliveryMethod,
+  OrderStatus,
+  PaymentMethod,
+  Role,
+} from 'generated/prisma/enums';
 import {
   OrderStatusHistory,
   OrderStatusHistoryDocument,
@@ -38,6 +45,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     @InjectModel(OrderStatusHistory.name)
     private readonly historyModel: Model<OrderStatusHistoryDocument>,
+    private readonly payments: PaymentsService,
   ) {}
 
   private logStatusChange(
@@ -92,6 +100,22 @@ export class OrdersService {
     }
 
     const totalAmount = unitPrice * dto.quantity;
+
+    if (dto.paymentMethod !== PaymentMethod.COD) {
+      const intent = await this.prisma.orderIntent.create({
+        data: {
+          buyerId: userId,
+          listingId: listing.id,
+          quantity: dto.quantity,
+          unitPrice,
+          totalAmount,
+          deliveryMethod: dto.deliveryMethod,
+          addressId,
+          paymentMethod: dto.paymentMethod,
+        },
+      });
+      return this.payments.createOrderIntentPayment(intent.id, totalAmount);
+    }
 
     const [order] = await this.prisma.$transaction([
       this.prisma.order.create({
@@ -234,5 +258,9 @@ export class OrdersService {
     ]);
     await this.logStatusChange(id, dto.status, adminId);
     return updatedOrder;
+  }
+
+  verifyPayment(userId: string, orderIntentId: string, dto: VerifyPaymentDto) {
+    return this.payments.verifyOrderIntentPayment(userId, orderIntentId, dto);
   }
 }
