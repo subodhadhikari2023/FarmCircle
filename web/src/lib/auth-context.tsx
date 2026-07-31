@@ -9,7 +9,7 @@ import {
 } from "react";
 import { API_URL } from "./api";
 
-type Role = "GROWER" | "VENDOR" | "CUSTOMER" | "ADMIN";
+export type Role = "GROWER" | "VENDOR" | "CUSTOMER" | "ADMIN";
 
 export type Me = {
   id: string;
@@ -31,13 +31,33 @@ type AuthContextValue = {
   user: Me | null;
   status: AuthStatus;
   accessToken: string | null;
-  login: (email: string, password: string) => Promise<void>;
-  register: (params: RegisterParams) => Promise<void>;
+  login: (email: string, password: string) => Promise<Me>;
+  register: (params: RegisterParams) => Promise<Me>;
   logout: () => Promise<void>;
-  setSessionFromToken: (accessToken: string) => Promise<void>;
+  setSessionFromToken: (accessToken: string) => Promise<Me | null>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+// Refresh this long before the access token's actual expiry, so a click
+// that lands right at the boundary doesn't race the token going stale.
+const REFRESH_BUFFER_MS = 15_000;
+
+function decodeTokenExpiryMs(token: string): number | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(
+      base64.length + ((4 - (base64.length % 4)) % 4),
+      "=",
+    );
+    const { exp } = JSON.parse(atob(padded)) as { exp?: number };
+    return typeof exp === "number" ? exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
 
 async function parseApiError(res: Response): Promise<string> {
   try {
@@ -76,38 +96,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAccessToken(null);
       setUser(null);
       setStatus("unauthenticated");
-      return;
+      return null;
     }
+    const me = (await res.json()) as Me;
     setAccessToken(token);
-    setUser((await res.json()) as Me);
+    setUser(me);
     setStatus("authenticated");
+    return me;
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${API_URL}/auth/refresh`, {
-          method: "POST",
-          credentials: "include",
-        });
-        if (cancelled) return;
-        if (!res.ok) {
-          setStatus("unauthenticated");
-          return;
-        }
-        const { accessToken: token } = (await res.json()) as {
-          accessToken: string;
-        };
-        await establishSession(token);
-      } catch {
-        if (!cancelled) setStatus("unauthenticated");
+  const silentRefresh = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        setAccessToken(null);
+        setUser(null);
+        setStatus("unauthenticated");
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      const { accessToken: token } = (await res.json()) as {
+        accessToken: string;
+      };
+      await establishSession(token);
+    } catch {
+      setAccessToken(null);
+      setUser(null);
+      setStatus("unauthenticated");
+    }
   }, [establishSession]);
+
+  useEffect(() => {
+    void (async () => {
+      await silentRefresh();
+    })();
+  }, [silentRefresh]);
+
+  // Access tokens are short-lived and only ever live in memory, so without
+  // this, any authenticated action taken after the token expires (e.g.
+  // clicking "Log out" a couple minutes after logging in) would silently
+  // 401. Re-refresh in the background shortly before each token expires.
+  useEffect(() => {
+    if (!accessToken) return;
+    const expiresAtMs = decodeTokenExpiryMs(accessToken);
+    if (expiresAtMs === null) return;
+
+    const delay = Math.max(expiresAtMs - Date.now() - REFRESH_BUFFER_MS, 0);
+    const timer = setTimeout(() => void silentRefresh(), delay);
+    return () => clearTimeout(timer);
+  }, [accessToken, silentRefresh]);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -121,7 +160,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { accessToken: token } = (await res.json()) as {
         accessToken: string;
       };
-      await establishSession(token);
+      const me = await establishSession(token);
+      if (!me) throw new Error("Signed in, but couldn't load your account.");
+      return me;
     },
     [establishSession],
   );
@@ -136,7 +177,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!res.ok) throw new Error(await parseApiError(res));
 
       try {
-        await login(params.email, params.password);
+        return await login(params.email, params.password);
       } catch {
         throw new Error(
           "Account created, but signing you in automatically failed. Try logging in.",

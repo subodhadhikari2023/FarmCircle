@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { ROLE_HOME } from "@/lib/roles";
 import { FormField } from "./form-field";
 
 export function LoginForm() {
@@ -18,11 +19,11 @@ export function LoginForm() {
 
     const form = new FormData(event.currentTarget);
     try {
-      await login(
+      const me = await login(
         String(form.get("email")),
         String(form.get("password")),
       );
-      router.push("/");
+      router.push(ROLE_HOME[me.role]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Log in failed.");
       setIsSubmitting(false);
