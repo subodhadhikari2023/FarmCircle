@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
 import { FormField } from "./form-field";
 import { GoogleButton } from "./google-button";
 
@@ -16,10 +18,34 @@ const ROLE_CARD_CLASS =
   "block cursor-pointer rounded-md border p-3 text-sm transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--color-focus-ring)]";
 
 export function SignupForm() {
+  const router = useRouter();
+  const { register } = useAuth();
   const [role, setRole] = useState<Role>("CUSTOMER");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+
+    const form = new FormData(event.currentTarget);
+    try {
+      await register({
+        name: String(form.get("name")),
+        email: String(form.get("email")),
+        password: String(form.get("password")),
+        role,
+      });
+      router.push("/");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign up failed.");
+      setIsSubmitting(false);
+    }
+  }
 
   return (
-    <form className="flex flex-col gap-4">
+    <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
       <div>
         <span className="mb-1 block text-sm font-medium text-foreground">
           I want to
@@ -103,11 +129,14 @@ export function SignupForm() {
         minLength={8}
       />
 
+      {error && <p className="text-sm text-danger-700">{error}</p>}
+
       <button
         type="submit"
-        className="mt-2 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        disabled={isSubmitting}
+        className="mt-2 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
       >
-        Sign up as a {ROLE_LABEL[role]}
+        {isSubmitting ? "Signing up…" : `Sign up as a ${ROLE_LABEL[role]}`}
       </button>
 
       <p className="mt-2 text-center text-sm text-muted">

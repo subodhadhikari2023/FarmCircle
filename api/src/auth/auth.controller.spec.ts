@@ -14,10 +14,12 @@ describe('AuthController', () => {
     login: jest.fn(),
     refresh: jest.fn(),
     logout: jest.fn(),
+    loginWithGoogle: jest.fn(),
   };
 
   const mockConfigService = {
     get: jest.fn().mockReturnValue('604800'),
+    getOrThrow: jest.fn().mockReturnValue('https://app.farmcircle.test'),
   };
 
   beforeEach(async () => {
@@ -139,6 +141,57 @@ describe('AuthController', () => {
 
       expect(mockAuthService.logout).toHaveBeenCalledWith(undefined);
       expect(clearCookieMock).toHaveBeenCalledWith('refreshToken');
+    });
+  });
+
+  describe('googleAuthCallback', () => {
+    it('throws UnauthorizedException when no user was attached by the guard', async () => {
+      const mockRequest = {} as unknown as Request;
+      const mockResponse = {
+        cookie: jest.fn(),
+        redirect: jest.fn(),
+      } as unknown as Response;
+
+      await expect(
+        controller.googleAuthCallback(mockRequest, mockResponse),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(mockAuthService.loginWithGoogle).not.toHaveBeenCalled();
+    });
+
+    it('sets the refresh cookie and redirects to the frontend callback route with the access token in the fragment', async () => {
+      const mockRequest = {
+        user: { id: 'u1', role: 'CUSTOMER' },
+      } as unknown as Request;
+      const cookieMock = jest.fn();
+      const redirectMock = jest.fn();
+      const mockResponse = {
+        cookie: cookieMock,
+        redirect: redirectMock,
+      } as unknown as Response;
+      mockAuthService.loginWithGoogle.mockResolvedValue({
+        accessToken: 'signed-access-token',
+        refreshToken: 'signed-refresh-token',
+      });
+
+      await controller.googleAuthCallback(mockRequest, mockResponse);
+
+      expect(mockAuthService.loginWithGoogle).toHaveBeenCalledWith({
+        id: 'u1',
+        role: 'CUSTOMER',
+      });
+      expect(cookieMock).toHaveBeenCalledWith(
+        'refreshToken',
+        'signed-refresh-token',
+        {
+          httpOnly: true,
+          secure: false,
+          sameSite: 'strict',
+          maxAge: 604800 * 1000,
+        },
+      );
+      expect(redirectMock).toHaveBeenCalledWith(
+        'https://app.farmcircle.test/auth/callback#accessToken=signed-access-token',
+      );
     });
   });
 });

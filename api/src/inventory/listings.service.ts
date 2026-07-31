@@ -70,6 +70,10 @@ export class ListingsService {
   async findPublished(role?: Role) {
     const listings = await this.prisma.listing.findMany({
       where: { isPublished: true, isClosed: false },
+      include: {
+        crop: { select: { name: true } },
+        variety: { select: { name: true } },
+      },
     });
     const contentByListingId = await this.getContentMap(
       listings.map((listing) => listing.id),
@@ -85,6 +89,10 @@ export class ListingsService {
   async findOnePublic(id: string, role?: Role) {
     const listing = await this.prisma.listing.findFirst({
       where: { id, isPublished: true },
+      include: {
+        crop: { select: { name: true } },
+        variety: { select: { name: true } },
+      },
     });
     if (!listing) {
       throw new NotFoundException('Listing not found');
@@ -234,7 +242,10 @@ export class ListingsService {
   }
 
   private mergeContent(
-    listing: Listing,
+    listing: Listing & {
+      crop?: { name: string };
+      variety?: { name: string };
+    },
     content: ListingContentDocument | null,
   ) {
     return {
