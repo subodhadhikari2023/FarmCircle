@@ -50,13 +50,26 @@ async function parseApiError(res: Response): Promise<string> {
   return "Something went wrong. Please try again.";
 }
 
+async function fetchOrThrow(
+  url: string,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new Error(
+      "Can't reach the server. Check your connection and try again.",
+    );
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Me | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [status, setStatus] = useState<AuthStatus>("loading");
 
   const establishSession = useCallback(async (token: string) => {
-    const res = await fetch(`${API_URL}/users/me`, {
+    const res = await fetchOrThrow(`${API_URL}/users/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
@@ -98,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      const res = await fetch(`${API_URL}/auth/login`, {
+      const res = await fetchOrThrow(`${API_URL}/auth/login`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -115,13 +128,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = useCallback(
     async (params: RegisterParams) => {
-      const res = await fetch(`${API_URL}/auth/register`, {
+      const res = await fetchOrThrow(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params),
       });
       if (!res.ok) throw new Error(await parseApiError(res));
-      await login(params.email, params.password);
+
+      try {
+        await login(params.email, params.password);
+      } catch {
+        throw new Error(
+          "Account created, but signing you in automatically failed. Try logging in.",
+        );
+      }
     },
     [login],
   );
@@ -133,6 +153,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         credentials: "include",
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       });
+    } catch {
+      // best-effort — local state below is cleared either way
     } finally {
       setAccessToken(null);
       setUser(null);

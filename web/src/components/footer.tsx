@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FooterAuthLinks } from "@/components/footer-auth-links";
 
 const FOOTER_LINK_CLASS =
   "text-muted transition-colors hover:text-primary-text";
@@ -28,12 +29,7 @@ export function Footer() {
             <Link href="/#how-it-works" className={FOOTER_LINK_CLASS}>
               How it works
             </Link>
-            <Link href="/login" className={FOOTER_LINK_CLASS}>
-              Log in
-            </Link>
-            <Link href="/signup" className={FOOTER_LINK_CLASS}>
-              Sign up
-            </Link>
+            <FooterAuthLinks />
           </nav>
         </div>
 
