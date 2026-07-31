@@ -1,7 +1,12 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { AuthCard } from "@/components/auth/auth-card";
-import { FormField } from "@/components/auth/form-field";
 import { GoogleButton } from "@/components/auth/google-button";
+import { LoginForm } from "@/components/auth/login-form";
+
+export const metadata: Metadata = {
+  title: "Log in",
+};
 
 export default function LoginPage() {
   return (
@@ -14,29 +19,7 @@ export default function LoginPage() {
         <div className="h-px flex-1 bg-border" />
       </div>
 
-      <form className="flex flex-col gap-4">
-        <FormField
-          id="email"
-          label="Email"
-          type="email"
-          autoComplete="email"
-          required
-        />
-        <FormField
-          id="password"
-          label="Password"
-          type="password"
-          autoComplete="current-password"
-          required
-          minLength={8}
-        />
-        <button
-          type="submit"
-          className="mt-2 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          Log in
-        </button>
-      </form>
+      <LoginForm />
 
       <p className="mt-6 text-center text-sm text-muted">
         Don&apos;t have an account?{" "}

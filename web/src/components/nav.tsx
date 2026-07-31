@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NavAuthLinks } from "@/components/nav-auth-links";
 
 const NAV_LINK_CLASS =
   "font-medium text-foreground transition-colors hover:text-primary-text";
@@ -19,15 +20,7 @@ export function Nav() {
           <Link href="/listings" className={NAV_LINK_CLASS}>
             Browse
           </Link>
-          <Link href="/login" className={NAV_LINK_CLASS}>
-            Log in
-          </Link>
-          <Link
-            href="/signup"
-            className="rounded-sm bg-primary px-3.5 py-1.5 font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            Sign up
-          </Link>
+          <NavAuthLinks />
         </div>
       </nav>
     </header>
