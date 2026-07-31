@@ -38,12 +38,17 @@ export default async function ListingDetailPage({ params }: Props) {
 
       {listing.images.length > 0 && (
         <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {listing.images.map((src) => (
+          {listing.images.map((src, i) => (
             // eslint-disable-next-line @next/next/no-img-element -- grower-supplied URLs from arbitrary hosts, not configurable via next/image remotePatterns
             <img
               key={src}
               src={src}
-              alt={`${listing.variety.name} (${listing.crop.name})`}
+              alt={
+                listing.images.length > 1
+                  ? `${listing.variety.name} (${listing.crop.name}), photo ${i + 1} of ${listing.images.length}`
+                  : `${listing.variety.name} (${listing.crop.name})`
+              }
+              loading="lazy"
               className="aspect-square w-full rounded-md border border-border object-cover"
             />
           ))}

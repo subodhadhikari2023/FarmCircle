@@ -12,6 +12,7 @@ export function ListingCard({ listing }: { listing: Listing }) {
         <img
           src={listing.images[0]}
           alt={`${listing.variety.name} (${listing.crop.name})`}
+          loading="lazy"
           className="aspect-[4/3] w-full object-cover"
         />
       )}
