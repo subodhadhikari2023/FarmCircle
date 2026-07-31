@@ -24,7 +24,11 @@ export function NavAuthLinks() {
   if (status === "authenticated" && user) {
     async function handleLogout() {
       setIsLoggingOut(true);
-      await logout();
+      try {
+        await logout();
+      } finally {
+        setIsLoggingOut(false);
+      }
     }
 
     return (
