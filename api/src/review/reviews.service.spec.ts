@@ -136,13 +136,16 @@ describe('ReviewsService', () => {
 
   describe('findAll', () => {
     it('returns only non-hidden reviews', async () => {
-      const reviews = [{ id: 'r1', isHidden: false }];
+      const reviews = [
+        { id: 'r1', isHidden: false, reviewer: { name: 'Ada' } },
+      ];
       mockPrismaService.review.findMany.mockResolvedValue(reviews);
 
       const result = await service.findAll();
 
       expect(mockPrismaService.review.findMany).toHaveBeenCalledWith({
         where: { isHidden: false },
+        include: { reviewer: { select: { name: true } } },
       });
       expect(result).toEqual(reviews);
     });
