@@ -200,6 +200,10 @@ describe('ListingsService', () => {
 
       expect(mockPrismaService.listing.findMany).toHaveBeenCalledWith({
         where: { isPublished: true, isClosed: false },
+        include: {
+          crop: { select: { name: true } },
+          variety: { select: { name: true } },
+        },
       });
       expect(mockContentModel.find).toHaveBeenCalledWith({
         listingId: { $in: ['l1'] },
@@ -265,6 +269,10 @@ describe('ListingsService', () => {
 
       expect(mockPrismaService.listing.findFirst).toHaveBeenCalledWith({
         where: { id: 'l1', isPublished: true },
+        include: {
+          crop: { select: { name: true } },
+          variety: { select: { name: true } },
+        },
       });
       expect(mockContentModel.findOne).toHaveBeenCalledWith({
         listingId: 'l1',
