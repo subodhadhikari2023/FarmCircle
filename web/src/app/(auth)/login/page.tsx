@@ -8,9 +8,21 @@ export const metadata: Metadata = {
   title: "Log in",
 };
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
+
   return (
     <AuthCard title="Log in" subtitle="Welcome back to FarmCircle.">
+      {error === "google_auth_failed" && (
+        <p className="mb-4 rounded-sm border border-danger-300 bg-danger-50 px-3 py-2 text-sm text-danger-700">
+          Google sign-in didn&apos;t go through. Please try again.
+        </p>
+      )}
+
       <GoogleButton label="Continue with Google" role="CUSTOMER" />
 
       <div className="my-6 flex items-center gap-3">
