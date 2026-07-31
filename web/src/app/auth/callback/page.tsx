@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { ROLE_HOME } from "@/lib/roles";
 
 export default function GoogleCallbackPage() {
   const router = useRouter();
@@ -21,7 +22,9 @@ export default function GoogleCallbackPage() {
       return;
     }
 
-    setSessionFromToken(token).finally(() => router.replace("/"));
+    setSessionFromToken(token)
+      .then((me) => router.replace(me ? ROLE_HOME[me.role] : "/login"))
+      .catch(() => router.replace("/login"));
   }, [router, setSessionFromToken]);
 
   return (
