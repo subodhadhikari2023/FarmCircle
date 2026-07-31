@@ -3,6 +3,7 @@ import { Space_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
 import { Footer } from "@/components/footer";
 import { Nav } from "@/components/nav";
 import { AuthProvider } from "@/lib/auth-context";
+import "material-symbols/outlined.css";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({

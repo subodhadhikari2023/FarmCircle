@@ -24,7 +24,11 @@ export function FooterAuthLinks() {
   if (status === "authenticated") {
     async function handleLogout() {
       setIsLoggingOut(true);
-      await logout();
+      try {
+        await logout();
+      } finally {
+        setIsLoggingOut(false);
+      }
     }
 
     return (

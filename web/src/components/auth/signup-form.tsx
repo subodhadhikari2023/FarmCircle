@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { ROLE_HOME } from "@/lib/roles";
 import { FormField } from "./form-field";
 import { GoogleButton } from "./google-button";
 
@@ -31,13 +32,13 @@ export function SignupForm() {
 
     const form = new FormData(event.currentTarget);
     try {
-      await register({
+      const me = await register({
         name: String(form.get("name")),
         email: String(form.get("email")),
         password: String(form.get("password")),
         role,
       });
-      router.push("/");
+      router.push(ROLE_HOME[me.role]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign up failed.");
       setIsSubmitting(false);
