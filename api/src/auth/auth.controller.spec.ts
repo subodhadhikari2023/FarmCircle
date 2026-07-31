@@ -145,16 +145,19 @@ describe('AuthController', () => {
   });
 
   describe('googleAuthCallback', () => {
-    it('throws UnauthorizedException when no user was attached by the guard', async () => {
+    it('redirects to the frontend login page with an error when no user was attached by the guard', async () => {
       const mockRequest = {} as unknown as Request;
+      const redirectMock = jest.fn();
       const mockResponse = {
         cookie: jest.fn(),
-        redirect: jest.fn(),
+        redirect: redirectMock,
       } as unknown as Response;
 
-      await expect(
-        controller.googleAuthCallback(mockRequest, mockResponse),
-      ).rejects.toThrow(UnauthorizedException);
+      await controller.googleAuthCallback(mockRequest, mockResponse);
+
+      expect(redirectMock).toHaveBeenCalledWith(
+        'https://app.farmcircle.test/login?error=google_auth_failed',
+      );
       expect(mockAuthService.loginWithGoogle).not.toHaveBeenCalled();
     });
 
