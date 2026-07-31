@@ -46,10 +46,10 @@ export function SignupForm() {
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-      <div>
-        <span className="mb-1 block text-sm font-medium text-foreground">
+      <fieldset className="m-0 border-0 p-0">
+        <legend className="mb-1 block p-0 text-sm font-medium text-foreground">
           I want to
-        </span>
+        </legend>
         <p className="mb-2 text-xs text-muted">
           Applies to whichever way you sign up below.
         </p>
@@ -99,7 +99,7 @@ export function SignupForm() {
             </label>
           </div>
         </div>
-      </div>
+      </fieldset>
 
       <GoogleButton
         label={`Continue with Google as a ${ROLE_LABEL[role]}`}
@@ -129,7 +129,11 @@ export function SignupForm() {
         minLength={8}
       />
 
-      {error && <p className="text-sm text-danger-700">{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-danger-700">
+          {error}
+        </p>
+      )}
 
       <button
         type="submit"
