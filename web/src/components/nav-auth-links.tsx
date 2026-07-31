@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 
@@ -8,19 +9,32 @@ const NAV_LINK_CLASS =
 
 export function NavAuthLinks() {
   const { user, status, logout } = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   if (status === "loading") {
-    return <span className="h-4 w-16 animate-pulse rounded-sm bg-border" />;
+    return (
+      <span
+        role="status"
+        aria-label="Loading"
+        className="h-4 w-16 animate-pulse rounded-sm bg-border"
+      />
+    );
   }
 
   if (status === "authenticated" && user) {
+    async function handleLogout() {
+      setIsLoggingOut(true);
+      await logout();
+    }
+
     return (
       <>
         <span className="hidden text-muted sm:inline">Hi, {user.name}</span>
         <button
           type="button"
-          onClick={() => void logout()}
-          className={NAV_LINK_CLASS}
+          disabled={isLoggingOut}
+          onClick={() => void handleLogout()}
+          className={`${NAV_LINK_CLASS} disabled:opacity-60`}
         >
           Log out
         </button>

@@ -44,9 +44,12 @@ export function LoginForm() {
         type="password"
         autoComplete="current-password"
         required
-        minLength={8}
       />
-      {error && <p className="text-sm text-danger-700">{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-danger-700">
+          {error}
+        </p>
+      )}
       <button
         type="submit"
         disabled={isSubmitting}

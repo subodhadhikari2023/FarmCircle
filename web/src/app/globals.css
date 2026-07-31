@@ -157,3 +157,9 @@ h6 {
   font-weight: 650;
   color: var(--color-ink);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse {
+    animation: none;
+  }
+}
