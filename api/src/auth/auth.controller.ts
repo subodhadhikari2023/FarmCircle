@@ -84,10 +84,7 @@ export class AuthController {
 
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
-  async googleAuthCallback(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+  async googleAuthCallback(@Req() req: Request, @Res() res: Response) {
     if (!req.user) {
       throw new UnauthorizedException('Google authentication failed');
     }
@@ -97,7 +94,8 @@ export class AuthController {
 
     this.setRefreshCookie(res, refreshToken);
 
-    return { accessToken };
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    res.redirect(`${frontendUrl}/auth/callback#accessToken=${accessToken}`);
   }
 
   private setRefreshCookie(res: Response, refreshToken: string) {
