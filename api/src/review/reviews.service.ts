@@ -47,7 +47,10 @@ export class ReviewsService {
   }
 
   findAll() {
-    return this.prisma.review.findMany({ where: { isHidden: false } });
+    return this.prisma.review.findMany({
+      where: { isHidden: false },
+      include: { reviewer: { select: { name: true } } },
+    });
   }
 
   async findOne(id: string) {
