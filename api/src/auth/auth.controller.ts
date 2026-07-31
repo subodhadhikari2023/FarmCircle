@@ -11,12 +11,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
+import { GoogleCallbackAuthGuard } from './guards/google-callback-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 @Controller('auth')
 export class AuthController {
@@ -83,10 +83,13 @@ export class AuthController {
   }
 
   @Get('google/callback')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleCallbackAuthGuard)
   async googleAuthCallback(@Req() req: Request, @Res() res: Response) {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+
     if (!req.user) {
-      throw new UnauthorizedException('Google authentication failed');
+      res.redirect(`${frontendUrl}/login?error=google_auth_failed`);
+      return;
     }
 
     const { accessToken, refreshToken } =
@@ -94,7 +97,6 @@ export class AuthController {
 
     this.setRefreshCookie(res, refreshToken);
 
-    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
     res.redirect(`${frontendUrl}/auth/callback#accessToken=${accessToken}`);
   }
 
