@@ -1,26 +1,159 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  --color-icy-aqua-50: hsl(177.7 100% 94.9%);
+  --color-icy-aqua-100: hsl(177.6 100% 90%);
+  --color-icy-aqua-200: hsl(178.2 100% 80%);
+  --color-icy-aqua-300: hsl(178 100% 70%);
+  --color-icy-aqua-400: hsl(177.9 100% 60%);
+  --color-icy-aqua-500: hsl(178.1 100% 50%);
+  --color-icy-aqua-600: hsl(177.9 100% 40%);
+  --color-icy-aqua-700: hsl(178 100% 30%);
+  --color-icy-aqua-800: hsl(178.2 100% 20%);
+  --color-icy-aqua-900: hsl(177.6 100% 10%);
+  --color-icy-aqua-950: hsl(178.3 100% 7.1%);
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-frosted-blue-50: hsl(190.6 68% 95.1%);
+  --color-frosted-blue-100: hsl(187.3 64.7% 90%);
+  --color-frosted-blue-200: hsl(188.2 64.7% 80%);
+  --color-frosted-blue-300: hsl(187.9 64.7% 70%);
+  --color-frosted-blue-400: hsl(187.7 64.7% 60%);
+  --color-frosted-blue-500: hsl(188 64.7% 50%);
+  --color-frosted-blue-600: hsl(187.7 64.7% 40%);
+  --color-frosted-blue-700: hsl(187.9 64.7% 30%);
+  --color-frosted-blue-800: hsl(188.2 64.7% 20%);
+  --color-frosted-blue-900: hsl(187.3 64.7% 10%);
+  --color-frosted-blue-950: hsl(187.8 65.7% 6.9%);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-lavender-grey-50: hsl(240 20% 95.1%);
+  --color-lavender-grey-100: hsl(240 17.6% 90%);
+  --color-lavender-grey-200: hsl(240 17.6% 80%);
+  --color-lavender-grey-300: hsl(240 17.6% 70%);
+  --color-lavender-grey-400: hsl(240 17.6% 60%);
+  --color-lavender-grey-500: hsl(240 17.6% 50%);
+  --color-lavender-grey-600: hsl(240 17.6% 40%);
+  --color-lavender-grey-700: hsl(240 17.6% 30%);
+  --color-lavender-grey-800: hsl(240 17.6% 20%);
+  --color-lavender-grey-900: hsl(240 17.6% 10%);
+  --color-lavender-grey-950: hsl(240 16.7% 7.1%);
+
+  --color-granite-50: hsl(160 12% 95.1%);
+  --color-granite-100: hsl(156 9.8% 90%);
+  --color-granite-200: hsl(160 11.8% 80%);
+  --color-granite-300: hsl(158.8 11.1% 70%);
+  --color-granite-400: hsl(160.9 10.8% 60%);
+  --color-granite-500: hsl(159.3 11.4% 50%);
+  --color-granite-600: hsl(160.9 10.8% 40%);
+  --color-granite-700: hsl(158.8 11.1% 30%);
+  --color-granite-800: hsl(160 11.8% 20%);
+  --color-granite-900: hsl(156 9.8% 10%);
+  --color-granite-950: hsl(165 11.1% 7.1%);
+
+  --color-dark-slate-grey-50: hsl(180 15.4% 94.9%);
+  --color-dark-slate-grey-100: hsl(180 13.7% 90%);
+  --color-dark-slate-grey-200: hsl(176.2 15.7% 80%);
+  --color-dark-slate-grey-300: hsl(177.4 15% 70%);
+  --color-dark-slate-grey-400: hsl(178 14.7% 60%);
+  --color-dark-slate-grey-500: hsl(176.9 15.3% 50%);
+  --color-dark-slate-grey-600: hsl(178 14.7% 40%);
+  --color-dark-slate-grey-700: hsl(177.4 15% 30%);
+  --color-dark-slate-grey-800: hsl(176.3 15.7% 20%);
+  --color-dark-slate-grey-900: hsl(180 13.7% 10%);
+  --color-dark-slate-grey-950: hsl(170 16.7% 7.1%);
+
+  /* semantic states — own ramps, not aliased to the 5 brand scales */
+  --color-success-50: hsl(152 60% 90%);
+  --color-success-100: hsl(152 60% 85%);
+  --color-success-200: hsl(152 60% 75%);
+  --color-success-300: hsl(152 60% 65%);
+  --color-success-400: hsl(152 60% 55%);
+  --color-success-500: hsl(152 60% 45%);
+  --color-success-600: hsl(152 60% 35%);
+  --color-success-700: hsl(152 60% 25%);
+  --color-success-800: hsl(152 60% 15%);
+  --color-success-900: hsl(152 60% 8%);
+  --color-success-950: hsl(152 60% 5%);
+
+  --color-warning-50: hsl(38 92% 95%);
+  --color-warning-100: hsl(38 92% 90%);
+  --color-warning-200: hsl(38 92% 80%);
+  --color-warning-300: hsl(38 92% 70%);
+  --color-warning-400: hsl(38 92% 60%);
+  --color-warning-500: hsl(38 92% 50%);
+  --color-warning-600: hsl(38 92% 40%);
+  --color-warning-700: hsl(38 92% 30%);
+  --color-warning-800: hsl(38 92% 20%);
+  --color-warning-900: hsl(38 92% 10%);
+  --color-warning-950: hsl(38 92% 7%);
+
+  --color-danger-50: hsl(352 75% 97%);
+  --color-danger-100: hsl(352 75% 95%);
+  --color-danger-200: hsl(352 75% 85%);
+  --color-danger-300: hsl(352 75% 75%);
+  --color-danger-400: hsl(352 75% 65%);
+  --color-danger-500: hsl(352 75% 55%);
+  --color-danger-600: hsl(352 75% 45%);
+  --color-danger-700: hsl(352 75% 35%);
+  --color-danger-800: hsl(352 75% 25%);
+  --color-danger-900: hsl(352 75% 15%);
+  --color-danger-950: hsl(352 75% 12%);
+
+  /* semantic aliases — single (light) mode only, no dark-mode variants in v1 */
+  --color-background: var(--color-granite-50);
+  --color-surface: var(--color-granite-100);
+  --color-border: var(--color-granite-300);
+  --color-foreground: var(--color-granite-800);
+  --color-muted: var(--color-granite-700);
+  --color-disabled: var(--color-granite-300);
+  --color-ink: var(--color-dark-slate-grey-900);
+
+  --color-primary: var(--color-icy-aqua-600);
+  --color-primary-foreground: var(--color-dark-slate-grey-950);
+  /* icy-aqua is only AA-safe as text at -800+; -600 is a fill color only
+     (1.8:1 against --color-background as text). Use this for any
+     icy-aqua-colored label/link text instead of --color-primary. */
+  --color-primary-text: var(--color-icy-aqua-800);
+  --color-secondary: var(--color-frosted-blue-700);
+  --color-secondary-foreground: var(--color-granite-50);
+  --color-tertiary: var(--color-lavender-grey-500);
+  --color-tertiary-foreground: var(--color-dark-slate-grey-950);
+  --color-focus-ring: var(--color-frosted-blue-700);
+
+  --color-success: var(--color-success-500);
+  --color-warning: var(--color-warning-500);
+  --color-danger: var(--color-danger-500);
+  --color-info: var(--color-frosted-blue-500);
+
+  /* role → color mapping (fixed, see docs/FarmCircle-Design-System.md) */
+  --color-role-grower: var(--color-icy-aqua-500);
+  --color-role-vendor: var(--color-frosted-blue-500);
+  --color-role-customer: var(--color-lavender-grey-500);
+  --color-role-admin: var(--color-dark-slate-grey-700);
+  --color-role-guest: var(--color-icy-aqua-500);
+
+  /* shape language — see docs/FarmCircle-Design-System.md §4 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-space-grotesk);
+  --font-mono: var(--font-jetbrains-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+  font-weight: 650;
+  color: var(--color-ink);
 }
