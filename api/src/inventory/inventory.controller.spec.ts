@@ -8,6 +8,7 @@ describe('InventoryController', () => {
 
   const mockListingsService = {
     create: jest.fn(),
+    findMine: jest.fn(),
     update: jest.fn(),
     close: jest.fn(),
     createDraftFromBatch: jest.fn(),
@@ -51,6 +52,18 @@ describe('InventoryController', () => {
 
       expect(mockListingsService.create).toHaveBeenCalledWith('u1', dto);
       expect(result).toEqual(listing);
+    });
+  });
+
+  describe('findMine', () => {
+    it("delegates to listingsService.findMine with the authenticated user's id", async () => {
+      const listings = [{ id: 'l1', ownerId: 'u1' }];
+      mockListingsService.findMine.mockResolvedValue(listings);
+
+      const result = await controller.findMine(mockRequest);
+
+      expect(mockListingsService.findMine).toHaveBeenCalledWith('u1');
+      expect(result).toEqual(listings);
     });
   });
 
