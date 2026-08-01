@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { type Order, listMyOrders } from "@/lib/orders";
 
@@ -14,6 +15,17 @@ const STATUS_LABEL: Record<Order["status"], string> = {
   PICKED_UP: "Picked up",
   CANCELLED: "Cancelled",
 };
+
+function PaymentProcessingBanner() {
+  const searchParams = useSearchParams();
+  if (searchParams.get("paid") !== "1") return null;
+
+  return (
+    <p className="mt-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground">
+      Payment received — your order will appear here shortly.
+    </p>
+  );
+}
 
 export default function CustomerOrdersPage() {
   const { accessToken } = useAuth();
@@ -50,6 +62,10 @@ export default function CustomerOrdersPage() {
       <p className="mt-1 text-muted">
         Every order you&apos;ve placed, with its current fulfillment status.
       </p>
+
+      <Suspense fallback={null}>
+        <PaymentProcessingBanner />
+      </Suspense>
 
       <div className="mt-10">
         {isLoading ? (
