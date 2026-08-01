@@ -72,6 +72,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     await this.client.incrbyfloat(this.queuedKey(batchId), -quantity);
   }
 
+  async getQueuedQuantity(batchId: string): Promise<number> {
+    const value = await this.client.get(this.queuedKey(batchId));
+    return value ? Number(value) : 0;
+  }
+
   async setPaymentHold(preBookingId: string, ttlSeconds: number) {
     await this.client.set(this.holdKey(preBookingId), '1', 'EX', ttlSeconds);
   }

@@ -57,6 +57,12 @@ export function ListingDetail({
       <p className="mt-1 text-sm text-muted">
         {Number(listing.availableQuantity).toFixed(0)} kg available
       </p>
+      {listing.wholesalePrice && listing.minWholesaleQty && (
+        <p className="mt-2 text-sm text-foreground">
+          Wholesale: ₹{Number(listing.wholesalePrice).toFixed(2)}/kg at{" "}
+          {Number(listing.minWholesaleQty).toFixed(0)}kg+
+        </p>
+      )}
       {listing.isOrganicCertified && (
         <p className="mt-2 text-sm font-medium text-success-700">
           Organic certified

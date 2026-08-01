@@ -40,7 +40,13 @@ export const ROLE_SHELL: Record<Role, RoleShellConfig> = {
     border: "border-frosted-blue-500",
     badgeBg: "bg-frosted-blue-50",
     badgeText: "text-frosted-blue-800",
-    links: [{ label: "Browse", href: "/listings" }],
+    links: [
+      { label: "Browse", href: "/vendor" },
+      { label: "Pre-book", href: "/vendor/upcoming" },
+      { label: "My pre-bookings", href: "/vendor/prebookings" },
+      { label: "My orders", href: "/vendor/orders" },
+      { label: "Addresses", href: "/vendor/addresses" },
+    ],
   },
   CUSTOMER: {
     label: "Customer",

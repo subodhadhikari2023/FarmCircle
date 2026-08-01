@@ -63,15 +63,34 @@ export class PreBookingsService {
   }
 
   findAllForUser(userId: string, role: Role) {
+    const include = {
+      batch: {
+        include: {
+          crop: { select: { name: true } },
+          variety: { select: { name: true } },
+        },
+      },
+    };
     if (role === Role.ADMIN) {
-      return this.prisma.preBooking.findMany();
+      return this.prisma.preBooking.findMany({ include });
     }
-    return this.prisma.preBooking.findMany({ where: { vendorId: userId } });
+    return this.prisma.preBooking.findMany({
+      where: { vendorId: userId },
+      include,
+    });
   }
 
   async findOne(userId: string, role: Role, id: string) {
     const preBooking = await this.prisma.preBooking.findUnique({
       where: { id },
+      include: {
+        batch: {
+          include: {
+            crop: { select: { name: true } },
+            variety: { select: { name: true } },
+          },
+        },
+      },
     });
     if (!preBooking) {
       throw new NotFoundException('Pre-booking not found');

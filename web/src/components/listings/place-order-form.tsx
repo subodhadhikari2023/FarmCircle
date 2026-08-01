@@ -5,6 +5,7 @@ import Script from "next/script";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { ROLE_HOME } from "@/lib/roles";
 import { type Address, listAddresses } from "@/lib/addresses";
 import {
   createOrder,
@@ -40,15 +41,20 @@ export function PlaceOrderForm({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const isCustomer = status === "authenticated" && user?.role === "CUSTOMER";
+  const isBuyer =
+    status === "authenticated" &&
+    (user?.role === "CUSTOMER" || user?.role === "VENDOR");
+  // ROLE_HOME segments ("/customer", "/vendor") double as the base path
+  // for that role's own order history/addresses pages.
+  const roleHome = user ? ROLE_HOME[user.role] : null;
 
   useEffect(() => {
-    if (!isCustomer || !accessToken) return;
+    if (!isBuyer || !accessToken) return;
     listAddresses(accessToken)
       .then((data) => setAddresses(data))
       .catch(() => setAddresses([]))
       .finally(() => setIsLoadingAddresses(false));
-  }, [isCustomer, accessToken]);
+  }, [isBuyer, accessToken]);
 
   if (status === "loading") {
     return (
@@ -67,13 +73,13 @@ export function PlaceOrderForm({
           <Link href="/login" className="font-medium text-primary-text hover:underline">
             Log in
           </Link>{" "}
-          as a customer to place an order.
+          as a Vendor or Customer to place an order.
         </p>
       </div>
     );
   }
 
-  if (!isCustomer) {
+  if (!isBuyer || !roleHome) {
     return null;
   }
 
@@ -108,7 +114,7 @@ export function PlaceOrderForm({
       });
 
       if (!isOrderIntentPayment(result)) {
-        router.push(`/customer/orders/${result.id}`);
+        router.push(`${roleHome}/orders/${result.id}`);
         return;
       }
 
@@ -135,7 +141,7 @@ export function PlaceOrderForm({
                 razorpayPaymentId: response.razorpay_payment_id,
                 razorpaySignature: response.razorpay_signature,
               });
-              router.push("/customer/orders?paid=1");
+              router.push(`${roleHome}/orders?paid=1`);
             } catch (err) {
               setSubmitError(
                 err instanceof Error
@@ -213,7 +219,7 @@ export function PlaceOrderForm({
             <p className="text-sm text-muted">
               You don&apos;t have any saved addresses yet.{" "}
               <Link
-                href="/customer/addresses"
+                href={`${roleHome}/addresses`}
                 className="font-medium text-primary-text hover:underline"
               >
                 Add one
