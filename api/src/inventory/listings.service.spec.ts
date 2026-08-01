@@ -3,8 +3,11 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { ListingsService } from './listings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { ListingContent } from './schemas/listing-content.schema';
 import { Role } from 'generated/prisma/enums';
+
+const decimal = (n: number) => ({ toNumber: () => n });
 
 describe('ListingsService', () => {
   let service: ListingsService;
@@ -34,6 +37,10 @@ describe('ListingsService', () => {
     findOneAndUpdate: jest.fn(),
   };
 
+  const mockRedisService = {
+    getQueuedQuantity: jest.fn(),
+  };
+
   const noContent = {
     description: undefined,
     images: [],
@@ -52,6 +59,7 @@ describe('ListingsService', () => {
       providers: [
         ListingsService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: RedisService, useValue: mockRedisService },
         {
           provide: getModelToken(ListingContent.name),
           useValue: mockContentModel,
@@ -300,27 +308,43 @@ describe('ListingsService', () => {
   });
 
   describe('getUpcoming', () => {
-    it('returns unpublished tracked draft listings, merged with Mongo content', async () => {
+    it('returns unpublished tracked draft listings, merged with Mongo content, with remaining pre-bookable capacity computed and the raw batch stripped out', async () => {
       const listing = {
         id: 'l1',
+        batchId: 'b1',
         hasTrackedCycle: true,
         isPublished: false,
         isClosed: false,
+        crop: { name: 'Tomato' },
+        variety: { name: 'Roma' },
+        preBookablePercent: decimal(60),
       };
-      mockPrismaService.listing.findMany.mockResolvedValue([listing]);
+      const listingWithBatch = {
+        ...listing,
+        batch: { predictedYield: decimal(100) },
+      };
+      mockPrismaService.listing.findMany.mockResolvedValue([listingWithBatch]);
       mockContentModel.find.mockResolvedValue([
         { listingId: 'l1', description: 'Growing well', images: [] },
       ]);
+      mockRedisService.getQueuedQuantity.mockResolvedValue(25);
 
       const result = await service.getUpcoming();
 
       expect(mockPrismaService.listing.findMany).toHaveBeenCalledWith({
         where: { hasTrackedCycle: true, isPublished: false, isClosed: false },
         orderBy: { createdAt: 'asc' },
+        include: {
+          crop: { select: { name: true } },
+          variety: { select: { name: true } },
+          batch: { select: { predictedYield: true } },
+        },
       });
       expect(mockContentModel.find).toHaveBeenCalledWith({
         listingId: { $in: ['l1'] },
       });
+      expect(mockRedisService.getQueuedQuantity).toHaveBeenCalledWith('b1');
+      // cap = predictedYield(100) * preBookablePercent(60%) = 60; remaining = 60 - reserved(25) = 35
       expect(result).toEqual([
         {
           ...listing,
@@ -328,6 +352,7 @@ describe('ListingsService', () => {
           images: [],
           isOrganicCertified: false,
           attributes: undefined,
+          preBookableRemaining: 35,
         },
       ]);
     });
