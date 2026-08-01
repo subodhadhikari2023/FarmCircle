@@ -7,7 +7,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { API_URL } from "./api";
+import { API_URL, parseApiError } from "./api";
 
 export type Role = "GROWER" | "VENDOR" | "CUSTOMER" | "ADMIN";
 
@@ -57,17 +57,6 @@ function decodeTokenExpiryMs(token: string): number | null {
   } catch {
     return null;
   }
-}
-
-async function parseApiError(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { message?: string | string[] };
-    if (Array.isArray(body.message)) return body.message.join(", ");
-    if (body.message) return body.message;
-  } catch {
-    // response wasn't JSON — fall through to the generic message
-  }
-  return "Something went wrong. Please try again.";
 }
 
 async function fetchOrThrow(
