@@ -49,7 +49,7 @@ export const ROLE_SHELL: Record<Role, RoleShellConfig> = {
     badgeBg: "bg-lavender-grey-100",
     badgeText: "text-lavender-grey-800",
     links: [
-      { label: "Browse", href: "/listings" },
+      { label: "Browse", href: "/customer" },
       { label: "My orders", href: "/customer/orders" },
       { label: "Addresses", href: "/customer/addresses" },
     ],
