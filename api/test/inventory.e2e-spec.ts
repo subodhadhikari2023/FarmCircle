@@ -513,6 +513,67 @@ describe('InventoryModule (e2e)', () => {
     });
   });
 
+  describe('GET /inventory/mine', () => {
+    it('returns 401 without a token', () => {
+      return request(app.getHttpServer()).get('/inventory/mine').expect(401);
+    });
+
+    it('returns 403 for a non-Grower', async () => {
+      const vendor = await createUser(Role.VENDOR, 'mine-nongrower');
+      const token = await loginAndGetToken(vendor.email);
+
+      await request(app.getHttpServer())
+        .get('/inventory/mine')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+    });
+
+    it("returns only the requesting grower's own listings, including drafts and closed ones, with wholesale pricing", async () => {
+      const growerA = await createUser(Role.GROWER, 'mine-a');
+      const growerB = await createUser(Role.GROWER, 'mine-b');
+      const tokenA = await loginAndGetToken(growerA.email);
+      const cropA = await createCrop(growerA.id, 'Mine Tomato');
+      const varietyA = await createVariety(cropA.id, 'Mine Roma');
+      const openListing = await createListing(
+        growerA.id,
+        cropA.id,
+        varietyA.id,
+      );
+      const draftListing = await createListing(
+        growerA.id,
+        cropA.id,
+        varietyA.id,
+        { isPublished: false },
+      );
+      const closedListing = await createListing(
+        growerA.id,
+        cropA.id,
+        varietyA.id,
+        { isClosed: true },
+      );
+      const cropB = await createCrop(growerB.id, 'Mine Potato');
+      const varietyB = await createVariety(cropB.id, 'Mine Russet');
+      const otherGrowersListing = await createListing(
+        growerB.id,
+        cropB.id,
+        varietyB.id,
+      );
+
+      const res = await request(app.getHttpServer())
+        .get('/inventory/mine')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const body = res.body as Array<{ id: string; wholesalePrice?: string }>;
+      const ids = body.map((l) => l.id);
+      expect(ids).toContain(openListing.id);
+      expect(ids).toContain(draftListing.id);
+      expect(ids).toContain(closedListing.id);
+      expect(ids).not.toContain(otherGrowersListing.id);
+      const found = body.find((l) => l.id === openListing.id);
+      expect(found?.wholesalePrice).toBeDefined();
+    });
+  });
+
   describe('PATCH /inventory/:id', () => {
     it("updates the listing's available quantity", async () => {
       const grower = await createUser(Role.GROWER, 'patch-grower');

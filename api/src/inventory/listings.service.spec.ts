@@ -333,6 +333,62 @@ describe('ListingsService', () => {
     });
   });
 
+  describe('findMine', () => {
+    it("returns the owner's own listings, newest first, with full pricing and merged content", async () => {
+      const listing = {
+        id: 'l1',
+        ownerId: 'u1',
+        retailPrice: 50,
+        wholesalePrice: 35,
+        minWholesaleQty: 15,
+        isPublished: false,
+        isClosed: false,
+      };
+      mockPrismaService.listing.findMany.mockResolvedValue([listing]);
+      mockContentModel.find.mockResolvedValue([
+        { listingId: 'l1', description: 'Draft listing', images: [] },
+      ]);
+
+      const result = await service.findMine('u1');
+
+      expect(mockPrismaService.listing.findMany).toHaveBeenCalledWith({
+        where: { ownerId: 'u1' },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          crop: { select: { name: true } },
+          variety: { select: { name: true } },
+        },
+      });
+      expect(mockContentModel.find).toHaveBeenCalledWith({
+        listingId: { $in: ['l1'] },
+      });
+      expect(result).toEqual([
+        {
+          ...listing,
+          description: 'Draft listing',
+          images: [],
+          isOrganicCertified: false,
+          attributes: undefined,
+        },
+      ]);
+    });
+
+    it('includes wholesale pricing, unlike the public findPublished view', async () => {
+      const listing = {
+        id: 'l1',
+        ownerId: 'u1',
+        wholesalePrice: 35,
+        minWholesaleQty: 15,
+      };
+      mockPrismaService.listing.findMany.mockResolvedValue([listing]);
+
+      const result = await service.findMine('u1');
+
+      expect(result[0]).toHaveProperty('wholesalePrice', 35);
+      expect(result[0]).toHaveProperty('minWholesaleQty', 15);
+    });
+  });
+
   describe('update', () => {
     it("updates the listing's available quantity, leaving Mongo content untouched when no content fields are given", async () => {
       const listing = { id: 'l1', ownerId: 'u1', availableQuantity: 100 };
