@@ -66,6 +66,11 @@ export const ROLE_SHELL: Record<Role, RoleShellConfig> = {
     border: "border-dark-slate-grey-700",
     badgeBg: "bg-dark-slate-grey-100",
     badgeText: "text-dark-slate-grey-800",
-    links: [],
+    links: [
+      { label: "Users", href: "/admin/users" },
+      { label: "Orders", href: "/admin/orders" },
+      { label: "Pre-bookings", href: "/admin/prebookings" },
+      { label: "Reviews", href: "/admin/reviews" },
+    ],
   },
 };
