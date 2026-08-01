@@ -9,6 +9,8 @@ describe('UsersController', () => {
   const mockUsersService = {
     findMe: jest.fn(),
     updateMe: jest.fn(),
+    listMyAddresses: jest.fn(),
+    createAddress: jest.fn(),
     findAll: jest.fn(),
     findOne: jest.fn(),
     suspend: jest.fn(),
@@ -74,6 +76,51 @@ describe('UsersController', () => {
 
       expect(mockUsersService.updateMe).toHaveBeenCalledWith('u1', dto);
       expect(result).toEqual(safeUser);
+    });
+  });
+
+  describe('listMyAddresses', () => {
+    it("delegates to usersService.listMyAddresses with the authenticated user's id", async () => {
+      const mockRequest = {
+        user: { id: 'u1', role: 'CUSTOMER' },
+      } as unknown as Request;
+      const addresses = [
+        {
+          id: 'a1',
+          userId: 'u1',
+          addressText: '123 Farm Lane',
+          landmark: null,
+          latitude: 12.9,
+          longitude: 77.6,
+          createdAt: new Date('2026-01-01'),
+        },
+      ];
+      mockUsersService.listMyAddresses.mockResolvedValue(addresses);
+
+      const result = await controller.listMyAddresses(mockRequest);
+
+      expect(mockUsersService.listMyAddresses).toHaveBeenCalledWith('u1');
+      expect(result).toEqual(addresses);
+    });
+  });
+
+  describe('createAddress', () => {
+    it("delegates to usersService.createAddress with the authenticated user's id and dto", async () => {
+      const mockRequest = {
+        user: { id: 'u1', role: 'CUSTOMER' },
+      } as unknown as Request;
+      const dto = {
+        addressText: '123 Farm Lane',
+        latitude: 12.9,
+        longitude: 77.6,
+      };
+      const address = { id: 'a1', userId: 'u1', ...dto };
+      mockUsersService.createAddress.mockResolvedValue(address);
+
+      const result = await controller.createAddress(mockRequest, dto);
+
+      expect(mockUsersService.createAddress).toHaveBeenCalledWith('u1', dto);
+      expect(result).toEqual(address);
     });
   });
 

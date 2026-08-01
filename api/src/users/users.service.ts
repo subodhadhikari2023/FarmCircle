@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { CreateAddressDto } from './dto/create-address.dto';
 import { Role } from 'generated/prisma/enums';
 
 const SAFE_USER_SELECT = {
@@ -35,6 +36,25 @@ export class UsersService {
       where: { id: userId },
       data: { name: dto.name },
       select: SAFE_USER_SELECT,
+    });
+  }
+
+  listMyAddresses(userId: string) {
+    return this.prismaService.address.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  createAddress(userId: string, dto: CreateAddressDto) {
+    return this.prismaService.address.create({
+      data: {
+        userId,
+        addressText: dto.addressText,
+        landmark: dto.landmark,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+      },
     });
   }
 
