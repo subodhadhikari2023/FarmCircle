@@ -158,6 +158,14 @@ describe('PreBookingsService', () => {
 
       expect(mockPrismaService.preBooking.findMany).toHaveBeenCalledWith({
         where: { vendorId: 'v1' },
+        include: {
+          batch: {
+            include: {
+              crop: { select: { name: true } },
+              variety: { select: { name: true } },
+            },
+          },
+        },
       });
     });
 
@@ -166,17 +174,37 @@ describe('PreBookingsService', () => {
 
       await service.findAllForUser('a1', Role.ADMIN);
 
-      expect(mockPrismaService.preBooking.findMany).toHaveBeenCalledWith();
+      expect(mockPrismaService.preBooking.findMany).toHaveBeenCalledWith({
+        include: {
+          batch: {
+            include: {
+              crop: { select: { name: true } },
+              variety: { select: { name: true } },
+            },
+          },
+        },
+      });
     });
   });
 
   describe('findOne', () => {
-    it('returns the pre-booking for its own Vendor', async () => {
+    it('returns the pre-booking for its own Vendor, with crop/variety included', async () => {
       const preBooking = { id: 'pb1', vendorId: 'v1' };
       mockPrismaService.preBooking.findUnique.mockResolvedValue(preBooking);
 
       const result = await service.findOne('v1', Role.VENDOR, 'pb1');
 
+      expect(mockPrismaService.preBooking.findUnique).toHaveBeenCalledWith({
+        where: { id: 'pb1' },
+        include: {
+          batch: {
+            include: {
+              crop: { select: { name: true } },
+              variety: { select: { name: true } },
+            },
+          },
+        },
+      });
       expect(result).toEqual(preBooking);
     });
 

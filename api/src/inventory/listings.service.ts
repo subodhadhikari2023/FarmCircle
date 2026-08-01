@@ -6,6 +6,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SetListingTermsDto } from './dto/set-listing-terms.dto';
@@ -20,6 +21,7 @@ import {
 export class ListingsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
     @InjectModel(ListingContent.name)
     private readonly contentModel: Model<ListingContentDocument>,
   ) {}
@@ -180,12 +182,30 @@ export class ListingsService {
     const listings = await this.prisma.listing.findMany({
       where: { hasTrackedCycle: true, isPublished: false, isClosed: false },
       orderBy: { createdAt: 'asc' },
+      include: {
+        crop: { select: { name: true } },
+        variety: { select: { name: true } },
+        batch: { select: { predictedYield: true } },
+      },
     });
     const contentByListingId = await this.getContentMap(
       listings.map((listing) => listing.id),
     );
-    return listings.map((listing) =>
-      this.mergeContent(listing, contentByListingId.get(listing.id) ?? null),
+    return Promise.all(
+      listings.map(async (listing) => {
+        // batch is only fetched to compute the capacity below — never
+        // exposed raw (Batch itself stays Grower/Admin-only surface area).
+        const { batch, ...rest } = listing;
+        const merged = this.mergeContent(
+          rest,
+          contentByListingId.get(listing.id) ?? null,
+        );
+        const cap =
+          batch!.predictedYield.toNumber() *
+          (listing.preBookablePercent.toNumber() / 100);
+        const reserved = await this.redis.getQueuedQuantity(listing.batchId!);
+        return { ...merged, preBookableRemaining: Math.max(cap - reserved, 0) };
+      }),
     );
   }
 

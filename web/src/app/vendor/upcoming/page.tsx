@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { type Listing, getListingsAsVendor } from "@/lib/listings";
-import { ListingCard } from "@/components/listings/listing-card";
+import { type Listing, getUpcomingListings } from "@/lib/listings";
+import { UpcomingListingCard } from "@/components/listings/upcoming-listing-card";
 
-export default function VendorDashboardPage() {
-  const { user, accessToken } = useAuth();
+export default function VendorUpcomingPage() {
+  const { accessToken } = useAuth();
 
   const [listings, setListings] = useState<Listing[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -15,12 +15,12 @@ export default function VendorDashboardPage() {
   useEffect(() => {
     if (!accessToken) return;
     let cancelled = false;
-    getListingsAsVendor(accessToken)
+    getUpcomingListings(accessToken)
       .then((data) => {
         if (!cancelled) setListings(data);
       })
       .catch(() => {
-        if (!cancelled) setLoadError("Couldn't load listings.");
+        if (!cancelled) setLoadError("Couldn't load upcoming batches.");
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -33,31 +33,28 @@ export default function VendorDashboardPage() {
   return (
     <main className="mx-auto flex-1 max-w-5xl px-6 py-16">
       <h1 className="font-display text-2xl font-[650] text-ink">
-        {user ? `Welcome back, ${user.name}` : "Browse the circle"}
+        Pre-book upcoming yield
       </h1>
       <p className="mt-1 text-muted">
-        Live stock at wholesale pricing — straight from the grower.
+        Batches still growing. Reserve a quantity now, pay a 20% advance once
+        it&apos;s harvest-ready.
       </p>
 
       <div className="mt-10">
         {isLoading ? (
-          <p className="text-muted">Loading listings…</p>
+          <p className="text-muted">Loading…</p>
         ) : loadError ? (
           <p role="alert" className="text-sm text-danger-700">
             {loadError}
           </p>
         ) : listings.length === 0 ? (
           <p className="text-muted">
-            No listings yet — check back soon as new batches come in.
+            Nothing open for pre-booking right now — check back soon.
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {listings.map((listing) => (
-              <ListingCard
-                key={listing.id}
-                listing={listing}
-                basePath="/vendor/listings"
-              />
+              <UpcomingListingCard key={listing.id} listing={listing} />
             ))}
           </div>
         )}
