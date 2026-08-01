@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
-import { Footer } from "@/components/footer";
-import { Nav } from "@/components/nav";
 import { AuthProvider } from "@/lib/auth-context";
 import "material-symbols/outlined.css";
 import "./globals.css";
@@ -43,11 +41,7 @@ export default function RootLayout({
       className={`${spaceGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <AuthProvider>
-          <Nav />
-          {children}
-          <Footer />
-        </AuthProvider>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );
