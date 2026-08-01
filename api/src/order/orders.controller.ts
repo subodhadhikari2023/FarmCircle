@@ -41,14 +41,14 @@ export class OrdersController {
   }
 
   @Get()
-  @Roles(Role.VENDOR, Role.CUSTOMER, Role.ADMIN)
+  @Roles(Role.VENDOR, Role.CUSTOMER, Role.GROWER, Role.ADMIN)
   findAll(@Req() req: Request) {
     const user = this.requireUser(req);
     return this.ordersService.findAllForUser(user.id, user.role);
   }
 
   @Get(':id')
-  @Roles(Role.VENDOR, Role.CUSTOMER, Role.ADMIN)
+  @Roles(Role.VENDOR, Role.CUSTOMER, Role.GROWER, Role.ADMIN)
   findOne(@Req() req: Request, @Param('id') id: string) {
     const user = this.requireUser(req);
     return this.ordersService.findOne(user.id, user.role, id);

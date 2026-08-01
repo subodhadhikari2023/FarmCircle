@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   Patch,
   Post,
@@ -34,6 +35,13 @@ export class InventoryController {
   @Post()
   create(@Req() req: Request, @Body() dto: CreateListingDto) {
     return this.listingsService.create(this.requireUserId(req), dto);
+  }
+
+  // Registered ahead of InventoryQueryController's GET /inventory/:id (see
+  // InventoryModule's controllers order) so "mine" isn't swallowed as an id.
+  @Get('mine')
+  findMine(@Req() req: Request) {
+    return this.listingsService.findMine(this.requireUserId(req));
   }
 
   @Patch(':id')

@@ -145,6 +145,11 @@ export class OrdersService {
     if (role === Role.ADMIN) {
       return this.prisma.order.findMany();
     }
+    if (role === Role.GROWER) {
+      return this.prisma.order.findMany({
+        where: { listing: { ownerId: userId } },
+      });
+    }
     return this.prisma.order.findMany({ where: { buyerId: userId } });
   }
 
@@ -153,7 +158,15 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException('Order not found');
     }
-    if (role !== Role.ADMIN && order.buyerId !== userId) {
+
+    if (role === Role.GROWER) {
+      const ownedListing = await this.prisma.listing.findFirst({
+        where: { id: order.listingId, ownerId: userId },
+      });
+      if (!ownedListing) {
+        throw new ForbiddenException('Not your order');
+      }
+    } else if (role !== Role.ADMIN && order.buyerId !== userId) {
       throw new ForbiddenException('Not your order');
     }
 

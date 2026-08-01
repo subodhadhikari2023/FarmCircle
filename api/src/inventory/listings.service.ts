@@ -159,6 +159,23 @@ export class ListingsService {
     return this.mergeContent(listing, content);
   }
 
+  async findMine(userId: string) {
+    const listings = await this.prisma.listing.findMany({
+      where: { ownerId: userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        crop: { select: { name: true } },
+        variety: { select: { name: true } },
+      },
+    });
+    const contentByListingId = await this.getContentMap(
+      listings.map((listing) => listing.id),
+    );
+    return listings.map((listing) =>
+      this.mergeContent(listing, contentByListingId.get(listing.id) ?? null),
+    );
+  }
+
   async getUpcoming() {
     const listings = await this.prisma.listing.findMany({
       where: { hasTrackedCycle: true, isPublished: false, isClosed: false },

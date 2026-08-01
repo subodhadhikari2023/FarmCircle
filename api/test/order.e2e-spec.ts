@@ -437,6 +437,29 @@ describe('OrderModule (e2e)', () => {
       const ids = (res.body as Array<{ id: string }>).map((o) => o.id);
       expect(ids).toContain(order.id);
     });
+
+    it("returns only orders on the requesting Grower's own listings", async () => {
+      const growerA = await createUser(Role.GROWER, 'list-grower-a');
+      const growerB = await createUser(Role.GROWER, 'list-grower-b');
+      const customer = await createUser(Role.CUSTOMER, 'list-grower-cust');
+      const tokenA = await loginAndGetToken(growerA.email);
+      const cropA = await createCrop(growerA.id, 'Beans');
+      const varietyA = await createVariety(cropA.id, 'Green Beans');
+      const listingA = await createListing(growerA.id, cropA.id, varietyA.id);
+      const cropB = await createCrop(growerB.id, 'Peas');
+      const varietyB = await createVariety(cropB.id, 'Green Peas');
+      const listingB = await createListing(growerB.id, cropB.id, varietyB.id);
+      const orderOnA = await createOrder(customer.id, listingA.id);
+      const orderOnB = await createOrder(customer.id, listingB.id);
+
+      const res = await request(app.getHttpServer())
+        .get('/orders')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const ids = (res.body as Array<{ id: string }>).map((o) => o.id);
+      expect(ids).toContain(orderOnA.id);
+      expect(ids).not.toContain(orderOnB.id);
+    });
   });
 
   describe('GET /orders/:id', () => {
@@ -468,6 +491,40 @@ describe('OrderModule (e2e)', () => {
       await request(app.getHttpServer())
         .get(`/orders/${order.id}`)
         .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+    });
+
+    it("returns 403 for a Grower who does not own the order's listing", async () => {
+      const growerA = await createUser(Role.GROWER, 'getone-grower-a');
+      const growerB = await createUser(Role.GROWER, 'getone-grower-b');
+      const customer = await createUser(Role.CUSTOMER, 'getone-grower-cust');
+      const tokenA = await loginAndGetToken(growerA.email);
+      const crop = await createCrop(growerB.id, 'Pumpkin');
+      const variety = await createVariety(crop.id, 'Sugar Pumpkin');
+      const listing = await createListing(growerB.id, crop.id, variety.id);
+      const order = await createOrder(customer.id, listing.id);
+
+      await request(app.getHttpServer())
+        .get(`/orders/${order.id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(403);
+    });
+
+    it("returns 200 for the Grower who owns the order's listing", async () => {
+      const grower = await createUser(Role.GROWER, 'getone-grower-owner');
+      const customer = await createUser(
+        Role.CUSTOMER,
+        'getone-grower-owner-cust',
+      );
+      const token = await loginAndGetToken(grower.email);
+      const crop = await createCrop(grower.id, 'Zucchini');
+      const variety = await createVariety(crop.id, 'Green Zucchini');
+      const listing = await createListing(grower.id, crop.id, variety.id);
+      const order = await createOrder(customer.id, listing.id);
+
+      await request(app.getHttpServer())
+        .get(`/orders/${order.id}`)
+        .set('Authorization', `Bearer ${token}`)
         .expect(200);
     });
   });
