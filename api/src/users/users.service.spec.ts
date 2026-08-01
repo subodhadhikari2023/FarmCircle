@@ -13,6 +13,10 @@ describe('UsersService', () => {
       findMany: jest.fn(),
       findFirst: jest.fn(),
     },
+    address: {
+      findMany: jest.fn(),
+      create: jest.fn(),
+    },
   };
 
   beforeEach(async () => {
@@ -92,6 +96,57 @@ describe('UsersService', () => {
         },
       });
       expect(result).toEqual(safeUser);
+    });
+  });
+
+  describe('listMyAddresses', () => {
+    it("lists the user's own addresses, most recent first", async () => {
+      const addresses = [
+        {
+          id: 'a1',
+          userId: 'u1',
+          addressText: '123 Farm Lane',
+          landmark: null,
+          latitude: 12.9,
+          longitude: 77.6,
+          createdAt: new Date('2026-01-02'),
+        },
+      ];
+      mockPrismaService.address.findMany.mockResolvedValue(addresses);
+
+      const result = await service.listMyAddresses('u1');
+
+      expect(mockPrismaService.address.findMany).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(result).toEqual(addresses);
+    });
+  });
+
+  describe('createAddress', () => {
+    it('creates an address owned by the authenticated user', async () => {
+      const dto = {
+        addressText: '123 Farm Lane',
+        landmark: 'Near the water tower',
+        latitude: 12.9,
+        longitude: 77.6,
+      };
+      const address = { id: 'a1', userId: 'u1', ...dto };
+      mockPrismaService.address.create.mockResolvedValue(address);
+
+      const result = await service.createAddress('u1', dto);
+
+      expect(mockPrismaService.address.create).toHaveBeenCalledWith({
+        data: {
+          userId: 'u1',
+          addressText: dto.addressText,
+          landmark: dto.landmark,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+        },
+      });
+      expect(result).toEqual(address);
     });
   });
 
