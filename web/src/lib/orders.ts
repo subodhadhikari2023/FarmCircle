@@ -49,21 +49,57 @@ export function isReviewable(status: OrderStatus): boolean {
   return REVIEWABLE_STATUSES.includes(status);
 }
 
-// Only COD is wired up here — UPI/ONLINE go through OrderIntent + Razorpay
-// Checkout, deferred until the payment integration pass.
 export type CreateOrderInput = {
   listingId: string;
   quantity: number;
   deliveryMethod: "DELIVERY" | "PICKUP";
   addressId?: string;
-  paymentMethod: "COD";
+  paymentMethod: "COD" | "UPI" | "ONLINE";
 };
+
+// Returned by POST /orders when paymentMethod is UPI/ONLINE — no Order
+// exists yet at this point, only an OrderIntent + a Razorpay order to open
+// Checkout against. The Order is created later, asynchronously, by the
+// Razorpay webhook (see orders.ts consumers for how this is handled).
+export type OrderIntentPayment = {
+  orderIntentId: string;
+  razorpayOrderId: string;
+  amount: number;
+  currency: string;
+  keyId: string;
+};
+
+export function isOrderIntentPayment(
+  result: Order | OrderIntentPayment,
+): result is OrderIntentPayment {
+  return "orderIntentId" in result;
+}
 
 export function createOrder(
   accessToken: string,
   input: CreateOrderInput,
-): Promise<Order> {
-  return apiFetch<Order>("/orders", accessToken, {
+): Promise<Order | OrderIntentPayment> {
+  return apiFetch<Order | OrderIntentPayment>("/orders", accessToken, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export type VerifyOrderPaymentInput = {
+  orderIntentId: string;
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  razorpaySignature: string;
+};
+
+// Confirms the Checkout signature and marks the Payment row SUCCESS. Does
+// NOT create the Order — that only happens once the Razorpay webhook lands,
+// which is why callers redirect to the order list, not an order detail page.
+export function verifyOrderPayment(
+  accessToken: string,
+  input: VerifyOrderPaymentInput,
+): Promise<unknown> {
+  return apiFetch<unknown>("/orders/verify-payment", accessToken, {
     method: "POST",
     body: JSON.stringify(input),
   });
