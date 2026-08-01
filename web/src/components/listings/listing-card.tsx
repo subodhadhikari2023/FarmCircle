@@ -1,10 +1,16 @@
 import Link from "next/link";
 import type { Listing } from "@/lib/listings";
 
-export function ListingCard({ listing }: { listing: Listing }) {
+export function ListingCard({
+  listing,
+  basePath = "/listings",
+}: {
+  listing: Listing;
+  basePath?: string;
+}) {
   return (
     <Link
-      href={`/listings/${listing.id}`}
+      href={`${basePath}/${listing.id}`}
       className="block overflow-hidden rounded-md border border-border bg-surface transition-colors hover:border-primary"
     >
       {listing.images[0] && (
