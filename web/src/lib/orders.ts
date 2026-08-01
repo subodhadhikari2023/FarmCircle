@@ -124,3 +124,18 @@ export function cancelOrder(
     method: "PATCH",
   });
 }
+
+// Admin-only manual override — sets status directly (any OrderStatus, not
+// just the next step in the fixed delivery/pickup state machine), for
+// resolving stuck orders. Releases reserved stock if the new status is
+// CANCELLED and the order wasn't already (mirrors OrdersService.dispute).
+export function disputeOrder(
+  accessToken: string,
+  id: string,
+  status: OrderStatus,
+): Promise<Order> {
+  return apiFetch<Order>(`/orders/${id}/dispute`, accessToken, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
