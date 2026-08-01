@@ -29,6 +29,7 @@ export const ROLE_SHELL: Record<Role, RoleShellConfig> = {
     links: [
       { label: "Crops", href: "/grower/crops" },
       { label: "Cycles", href: "/grower/cycles" },
+      { label: "Batches", href: "/grower/batches" },
     ],
   },
   VENDOR: {
