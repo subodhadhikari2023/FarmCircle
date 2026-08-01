@@ -215,9 +215,7 @@ describe('ReviewsService', () => {
 
   describe('findHidden', () => {
     it('returns only hidden reviews', async () => {
-      const reviews = [
-        { id: 'r1', isHidden: true, reviewer: { name: 'Ada' } },
-      ];
+      const reviews = [{ id: 'r1', isHidden: true, reviewer: { name: 'Ada' } }];
       mockPrismaService.review.findMany.mockResolvedValue(reviews);
 
       const result = await service.findHidden();
