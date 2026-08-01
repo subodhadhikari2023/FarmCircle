@@ -1,11 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import Script from "next/script";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { type Address, listAddresses } from "@/lib/addresses";
-import { createOrder } from "@/lib/orders";
+import {
+  createOrder,
+  isOrderIntentPayment,
+  verifyOrderPayment,
+} from "@/lib/orders";
 
 const INPUT_CLASS =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[var(--color-focus-ring)]";
@@ -27,6 +32,10 @@ export function PlaceOrderForm({
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [addressId, setAddressId] = useState("");
   const [isLoadingAddresses, setIsLoadingAddresses] = useState(true);
+  const [paymentMethod, setPaymentMethod] = useState<
+    "COD" | "UPI" | "ONLINE"
+  >("COD");
+  const [razorpayReady, setRazorpayReady] = useState(false);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -82,17 +91,68 @@ export function PlaceOrderForm({
       return;
     }
 
+    if (paymentMethod !== "COD" && !razorpayReady) {
+      setSubmitError("Payment is still loading. Try again in a moment.");
+      return;
+    }
+
     setSubmitError(null);
     setIsSubmitting(true);
     try {
-      const order = await createOrder(accessToken, {
+      const result = await createOrder(accessToken, {
         listingId,
         quantity: parsedQuantity,
         deliveryMethod,
         addressId: deliveryMethod === "DELIVERY" ? addressId : undefined,
-        paymentMethod: "COD",
+        paymentMethod,
       });
-      router.push(`/customer/orders/${order.id}`);
+
+      if (!isOrderIntentPayment(result)) {
+        router.push(`/customer/orders/${result.id}`);
+        return;
+      }
+
+      const checkout = new window.Razorpay({
+        key: result.keyId,
+        amount: Math.round(result.amount * 100),
+        currency: result.currency,
+        order_id: result.razorpayOrderId,
+        name: "FarmCircle",
+        prefill: {
+          name: user?.name,
+          email: user?.email,
+        },
+        method:
+          paymentMethod === "UPI"
+            ? { upi: "1", card: "0", netbanking: "0", wallet: "0" }
+            : { upi: "0", card: "1", netbanking: "1", wallet: "0" },
+        handler: (response) => {
+          void (async () => {
+            try {
+              await verifyOrderPayment(accessToken, {
+                orderIntentId: result.orderIntentId,
+                razorpayOrderId: response.razorpay_order_id,
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpaySignature: response.razorpay_signature,
+              });
+              router.push("/customer/orders?paid=1");
+            } catch (err) {
+              setSubmitError(
+                err instanceof Error
+                  ? err.message
+                  : "Payment succeeded but couldn't be verified. Contact support.",
+              );
+              setIsSubmitting(false);
+            }
+          })();
+        },
+        modal: {
+          ondismiss: () => {
+            setIsSubmitting(false);
+          },
+        },
+      });
+      checkout.open();
     } catch (err) {
       setSubmitError(
         err instanceof Error ? err.message : "Couldn't place the order.",
@@ -187,16 +247,31 @@ export function PlaceOrderForm({
         </span>
         <div className="flex flex-col gap-2 text-sm text-foreground">
           <label className="flex items-center gap-2">
-            <input type="radio" name="payment-method" checked readOnly />
+            <input
+              type="radio"
+              name="payment-method"
+              checked={paymentMethod === "COD"}
+              onChange={() => setPaymentMethod("COD")}
+            />
             Cash on delivery / pickup
           </label>
-          <label className="flex items-center gap-2 text-muted">
-            <input type="radio" name="payment-method" disabled />
-            UPI (coming soon)
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="payment-method"
+              checked={paymentMethod === "UPI"}
+              onChange={() => setPaymentMethod("UPI")}
+            />
+            UPI
           </label>
-          <label className="flex items-center gap-2 text-muted">
-            <input type="radio" name="payment-method" disabled />
-            Online payment (coming soon)
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="payment-method"
+              checked={paymentMethod === "ONLINE"}
+              onChange={() => setPaymentMethod("ONLINE")}
+            />
+            Card / net banking
           </label>
         </div>
       </div>
@@ -217,6 +292,12 @@ export function PlaceOrderForm({
       >
         {isSubmitting ? "Placing order…" : "Place order"}
       </button>
+
+      <Script
+        src="https://checkout.razorpay.com/v1/checkout.js"
+        strategy="lazyOnload"
+        onLoad={() => setRazorpayReady(true)}
+      />
     </form>
   );
 }
