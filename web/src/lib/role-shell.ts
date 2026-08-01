@@ -26,7 +26,13 @@ export const ROLE_SHELL: Record<Role, RoleShellConfig> = {
     border: "border-icy-aqua-500",
     badgeBg: "bg-icy-aqua-50",
     badgeText: "text-icy-aqua-800",
-    links: [],
+    links: [
+      { label: "Crops", href: "/grower/crops" },
+      { label: "Cycles", href: "/grower/cycles" },
+      { label: "Batches", href: "/grower/batches" },
+      { label: "Listings", href: "/grower/listings" },
+      { label: "Orders", href: "/grower/orders" },
+    ],
   },
   VENDOR: {
     label: "Vendor",
