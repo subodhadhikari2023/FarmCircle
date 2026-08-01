@@ -41,6 +41,14 @@ export class ReviewsController {
     return this.reviewsService.findAll();
   }
 
+  // Registered before ':id' — otherwise Nest would match "hidden" as an id.
+  @Get('hidden')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  findHidden() {
+    return this.reviewsService.findHidden();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.reviewsService.findOne(id);
@@ -51,5 +59,12 @@ export class ReviewsController {
   @Roles(Role.ADMIN)
   hide(@Param('id') id: string) {
     return this.reviewsService.hide(id);
+  }
+
+  @Patch(':id/unhide')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  unhide(@Param('id') id: string) {
+    return this.reviewsService.unhide(id);
   }
 }

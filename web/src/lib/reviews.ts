@@ -29,9 +29,8 @@ export function createReview(
   });
 }
 
-// Public — same list Admin moderates from. Already excludes isHidden rows
-// server-side, so there's no way (via this endpoint) to review or unhide
-// something once it's been hidden.
+// Public — the list Admin moderates from. Excludes isHidden rows
+// server-side; see listHiddenReviews for those.
 export async function listReviews(): Promise<Review[]> {
   try {
     const res = await fetch(`${API_URL}/reviews`);
@@ -42,9 +41,24 @@ export async function listReviews(): Promise<Review[]> {
   }
 }
 
-// Admin-only. One-way takedown — no unhide endpoint exists.
+// Admin-only.
 export function hideReview(accessToken: string, id: string): Promise<Review> {
   return apiFetch<Review>(`/reviews/${id}/hide`, accessToken, {
+    method: "PATCH",
+  });
+}
+
+// Admin-only. The only way to see a review after it's been hidden — GET
+// /reviews and GET /reviews/:id both exclude isHidden rows unconditionally.
+export function listHiddenReviews(accessToken: string): Promise<Review[]> {
+  return apiFetch<Review[]>("/reviews/hidden", accessToken);
+}
+
+export function unhideReview(
+  accessToken: string,
+  id: string,
+): Promise<Review> {
+  return apiFetch<Review>(`/reviews/${id}/unhide`, accessToken, {
     method: "PATCH",
   });
 }

@@ -66,9 +66,33 @@ export class ReviewsService {
     if (!review) {
       throw new NotFoundException('Review not found');
     }
+    if (review.isHidden) {
+      throw new ConflictException('Review is already hidden');
+    }
     return this.prisma.review.update({
       where: { id },
       data: { isHidden: true },
+    });
+  }
+
+  findHidden() {
+    return this.prisma.review.findMany({
+      where: { isHidden: true },
+      include: { reviewer: { select: { name: true } } },
+    });
+  }
+
+  async unhide(id: string) {
+    const review = await this.prisma.review.findUnique({ where: { id } });
+    if (!review) {
+      throw new NotFoundException('Review not found');
+    }
+    if (!review.isHidden) {
+      throw new ConflictException('Review is not hidden');
+    }
+    return this.prisma.review.update({
+      where: { id },
+      data: { isHidden: false },
     });
   }
 }
