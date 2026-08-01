@@ -23,6 +23,24 @@ export type Order = {
   updatedAt: string;
 };
 
+// Terminal statuses with no further advance step (mirrors NEXT_STATUS in
+// api/src/order/orders.service.ts) — used to grey out the button client-side;
+// the server is still the source of truth (409s if we get this wrong).
+const TERMINAL_STATUSES: OrderStatus[] = [
+  "DELIVERED",
+  "PICKED_UP",
+  "CANCELLED",
+];
+
+export function hasNextStatus(status: OrderStatus): boolean {
+  return !TERMINAL_STATUSES.includes(status);
+}
+
+// Grower-only. Lists orders on the requesting Grower's own listings.
+export function listMyOrders(accessToken: string): Promise<Order[]> {
+  return apiFetch<Order[]>("/orders", accessToken);
+}
+
 // Grower-only. Advances the order one step along a fixed state machine
 // derived from deliveryMethod — no request body, no target status to pick.
 export function advanceOrderStatus(
