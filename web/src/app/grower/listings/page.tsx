@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { type Crop, listCrops } from "@/lib/crops";
 import { type Variety, listVarieties } from "@/lib/varieties";
-import { type Listing as PublicListing, getListing } from "@/lib/listings";
 import {
   type ListingAdmin,
   type UpdateListingInput,
   closeListing,
   createListing,
+  listMyListings,
   updateListing,
 } from "@/lib/listings-admin";
 
@@ -39,18 +39,12 @@ function fromAdmin(listing: ListingAdmin): ManagedListing {
   };
 }
 
-function fromPublic(listing: PublicListing): ManagedListing {
-  return {
-    id: listing.id,
-    availableQuantity: listing.availableQuantity,
-    description: listing.description ?? "",
-    isOrganicCertified: listing.isOrganicCertified,
-    retailPrice: listing.retailPrice,
-  };
-}
-
 export default function GrowerListingsPage() {
   const { accessToken } = useAuth();
+
+  const [listings, setListings] = useState<ListingAdmin[]>([]);
+  const [isLoadingListings, setIsLoadingListings] = useState(true);
+  const [listingsError, setListingsError] = useState<string | null>(null);
 
   const [crops, setCrops] = useState<Crop[]>([]);
   const [cropId, setCropId] = useState("");
@@ -70,9 +64,6 @@ export default function GrowerListingsPage() {
   const [isCreating, setIsCreating] = useState(false);
 
   const [managed, setManaged] = useState<ManagedListing | null>(null);
-  const [lookupId, setLookupId] = useState("");
-  const [lookupError, setLookupError] = useState<string | null>(null);
-  const [isLookingUp, setIsLookingUp] = useState(false);
 
   const [editQuantity, setEditQuantity] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -86,6 +77,28 @@ export default function GrowerListingsPage() {
     listCrops(accessToken)
       .then(setCrops)
       .catch(() => setCrops([]));
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+    listMyListings(accessToken)
+      .then((data) => {
+        if (!cancelled) setListings(data);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setListingsError(
+            err instanceof Error ? err.message : "Couldn't load listings.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingListings(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [accessToken]);
 
   useEffect(() => {
@@ -131,6 +144,7 @@ export default function GrowerListingsPage() {
         description: description.trim() || undefined,
         isOrganicCertified,
       });
+      setListings((prev) => [listing, ...prev]);
       loadIntoEditor(fromAdmin(listing));
       setRetailPrice("");
       setWholesalePrice("");
@@ -147,24 +161,6 @@ export default function GrowerListingsPage() {
     }
   }
 
-  async function handleLookup(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLookupError(null);
-    setIsLookingUp(true);
-    try {
-      const listing = await getListing(lookupId.trim());
-      if (!listing) {
-        setLookupError(
-          "No published listing found with that ID (draft/unpublished listings aren't visible here).",
-        );
-        return;
-      }
-      loadIntoEditor(fromPublic(listing));
-    } finally {
-      setIsLookingUp(false);
-    }
-  }
-
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!accessToken || !managed) return;
@@ -177,6 +173,12 @@ export default function GrowerListingsPage() {
         isOrganicCertified: editOrganic,
       };
       const listing = await updateListing(accessToken, managed.id, input);
+      // update()/close() responses don't include the crop/variety relations
+      // that findMine() does — merge onto the existing row instead of
+      // replacing it outright, so the list keeps showing crop/variety names.
+      setListings((prev) =>
+        prev.map((l) => (l.id === listing.id ? { ...l, ...listing } : l)),
+      );
       loadIntoEditor(fromAdmin(listing));
     } catch (err) {
       setEditError(
@@ -196,6 +198,9 @@ export default function GrowerListingsPage() {
     setIsClosing(true);
     try {
       const listing = await closeListing(accessToken, managed.id);
+      setListings((prev) =>
+        prev.map((l) => (l.id === listing.id ? { ...l, ...listing } : l)),
+      );
       loadIntoEditor(fromAdmin(listing));
     } catch (err) {
       setEditError(
@@ -398,35 +403,67 @@ export default function GrowerListingsPage() {
       <hr className="my-10 border-border" />
 
       <h2 className="font-display text-lg font-[650] text-ink">
-        Edit or close a listing
+        Your listings
       </h2>
       <p className="mt-1 text-sm text-muted">
-        There&apos;s no &quot;my listings&quot; view yet — a listing you just
-        created loads below automatically, or paste a published listing&apos;s
-        ID to look it up.
+        Includes unpublished drafts (from tracked batches) and closed
+        listings. Select one to edit its stock/description or close it.
       </p>
 
-      <form onSubmit={handleLookup} className="mt-4 flex gap-3">
-        <input
-          value={lookupId}
-          onChange={(event) => setLookupId(event.target.value)}
-          placeholder="Listing ID"
-          required
-          className={INPUT_CLASS}
-        />
-        <button
-          type="submit"
-          disabled={isLookingUp}
-          className="shrink-0 rounded-sm border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface disabled:opacity-60"
-        >
-          {isLookingUp ? "Looking up…" : "Load"}
-        </button>
-      </form>
-      {lookupError && (
-        <p role="alert" className="mt-2 text-sm text-danger-700">
-          {lookupError}
-        </p>
-      )}
+      <div className="mt-4">
+        {isLoadingListings ? (
+          <p className="text-muted">Loading listings…</p>
+        ) : listingsError ? (
+          <p role="alert" className="text-sm text-danger-700">
+            {listingsError}
+          </p>
+        ) : listings.length === 0 ? (
+          <p className="text-muted">
+            No listings yet — create a direct listing above, or set terms on
+            a batch that&apos;s reached its final milestone.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border rounded-md border border-border bg-surface">
+            {listings.map((listing) => (
+              <li key={listing.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <div className="flex-1">
+                  <p className="text-foreground">
+                    {listing.variety?.name ?? "—"}
+                    {listing.crop?.name && (
+                      <span className="text-muted"> · {listing.crop.name}</span>
+                    )}
+                  </p>
+                  <p className="mt-1 text-sm text-muted">
+                    ₹{listing.retailPrice}/kg · {listing.availableQuantity} kg
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    listing.isClosed
+                      ? "bg-dark-slate-grey-100 text-dark-slate-grey-800"
+                      : listing.isPublished
+                        ? "bg-icy-aqua-50 text-primary-text"
+                        : "bg-lavender-grey-100 text-lavender-grey-800"
+                  }`}
+                >
+                  {listing.isClosed
+                    ? "Closed"
+                    : listing.isPublished
+                      ? "Live"
+                      : "Draft"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => loadIntoEditor(fromAdmin(listing))}
+                  className="rounded-sm border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background"
+                >
+                  Edit
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {managed && (
         <form onSubmit={handleSave} className="mt-6 flex flex-col gap-4 rounded-md border border-border bg-surface p-4">

@@ -25,6 +25,10 @@ export type ListingAdmin = {
   images: string[];
   isOrganicCertified: boolean;
   attributes?: Record<string, unknown>;
+  // Only present on responses that include the crop/variety relations
+  // (GET /inventory/mine) — absent on create/update/close.
+  crop?: { name: string };
+  variety?: { name: string };
 };
 
 export type CreateListingInput = {
@@ -50,6 +54,10 @@ export type UpdateListingInput = {
   description?: string;
   isOrganicCertified?: boolean;
 };
+
+export function listMyListings(accessToken: string): Promise<ListingAdmin[]> {
+  return apiFetch<ListingAdmin[]>("/inventory/mine", accessToken);
+}
 
 export function createListing(
   accessToken: string,
