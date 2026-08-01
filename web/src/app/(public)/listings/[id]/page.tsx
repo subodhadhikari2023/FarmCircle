@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getListing } from "@/lib/listings";
 import { getBatchTimeline } from "@/lib/batches";
 import { ListingTimeline } from "@/components/listings/listing-timeline";
+import { PlaceOrderForm } from "@/components/listings/place-order-form";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -87,6 +88,13 @@ export default async function ListingDetailPage({ params }: Props) {
       )}
 
       {timeline && <ListingTimeline timeline={timeline} />}
+
+      {Number(listing.availableQuantity) > 0 && (
+        <PlaceOrderForm
+          listingId={listing.id}
+          availableQuantity={Number(listing.availableQuantity)}
+        />
+      )}
     </main>
   );
 }

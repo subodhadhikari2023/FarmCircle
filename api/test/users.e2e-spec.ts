@@ -12,6 +12,7 @@ describe('UsersModule (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   const createdUserIds: string[] = [];
+  const createdAddressIds: string[] = [];
   const PASSWORD = 'Test-Password-123';
 
   async function createUser(role: Role, label: string) {
@@ -52,6 +53,11 @@ describe('UsersModule (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (createdAddressIds.length > 0) {
+      await prisma.address.deleteMany({
+        where: { id: { in: createdAddressIds } },
+      });
+    }
     if (createdUserIds.length > 0) {
       await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
     }
@@ -105,6 +111,86 @@ describe('UsersModule (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({ role: 'ADMIN' })
         .expect(400);
+    });
+  });
+
+  describe('POST /users/me/addresses', () => {
+    it('returns 401 without a token', () => {
+      return request(app.getHttpServer())
+        .post('/users/me/addresses')
+        .send({ addressText: '123 Farm Lane', latitude: 12.9, longitude: 77.6 })
+        .expect(401);
+    });
+
+    it('creates an address owned by the authenticated user', async () => {
+      const customer = await createUser(Role.CUSTOMER, 'addr-create');
+      const token = await loginAndGetToken(customer.email);
+
+      const res = await request(app.getHttpServer())
+        .post('/users/me/addresses')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          addressText: '123 Farm Lane',
+          landmark: 'Near the water tower',
+          latitude: 12.9,
+          longitude: 77.6,
+        })
+        .expect(201);
+
+      const body = res.body as { id: string; userId: string };
+      createdAddressIds.push(body.id);
+      expect(body.userId).toBe(customer.id);
+    });
+
+    it('returns 400 for an out-of-range latitude', async () => {
+      const customer = await createUser(Role.CUSTOMER, 'addr-invalid');
+      const token = await loginAndGetToken(customer.email);
+
+      await request(app.getHttpServer())
+        .post('/users/me/addresses')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ addressText: '123 Farm Lane', latitude: 200, longitude: 77.6 })
+        .expect(400);
+    });
+  });
+
+  describe('GET /users/me/addresses', () => {
+    it('returns 401 without a token', () => {
+      return request(app.getHttpServer())
+        .get('/users/me/addresses')
+        .expect(401);
+    });
+
+    it("lists only the authenticated user's own addresses", async () => {
+      const customer = await createUser(Role.CUSTOMER, 'addr-list');
+      const otherCustomer = await createUser(Role.CUSTOMER, 'addr-list-other');
+      const token = await loginAndGetToken(customer.email);
+      const otherToken = await loginAndGetToken(otherCustomer.email);
+
+      const createRes = await request(app.getHttpServer())
+        .post('/users/me/addresses')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ addressText: '123 Farm Lane', latitude: 12.9, longitude: 77.6 })
+        .expect(201);
+      const address = createRes.body as { id: string };
+      createdAddressIds.push(address.id);
+
+      await request(app.getHttpServer())
+        .post('/users/me/addresses')
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({ addressText: '456 Other St', latitude: 13.1, longitude: 77.5 })
+        .expect(201)
+        .then((res) => {
+          createdAddressIds.push((res.body as { id: string }).id);
+        });
+
+      const listRes = await request(app.getHttpServer())
+        .get('/users/me/addresses')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      const ids = (listRes.body as Array<{ id: string }>).map((a) => a.id);
+      expect(ids).toEqual([address.id]);
     });
   });
 

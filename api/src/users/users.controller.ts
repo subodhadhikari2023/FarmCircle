@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Req,
   UnauthorizedException,
   UseGuards,
@@ -14,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { CreateAddressDto } from './dto/create-address.dto';
 import { Role } from 'generated/prisma/enums';
 
 @Controller('users')
@@ -36,6 +38,24 @@ export class UsersController {
       throw new UnauthorizedException('Not authenticated');
     }
     return this.usersService.updateMe(req.user.id, dto);
+  }
+
+  @Get('me/addresses')
+  @UseGuards(JwtAuthGuard)
+  listMyAddresses(@Req() req: Request) {
+    if (!req.user) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+    return this.usersService.listMyAddresses(req.user.id);
+  }
+
+  @Post('me/addresses')
+  @UseGuards(JwtAuthGuard)
+  createAddress(@Req() req: Request, @Body() dto: CreateAddressDto) {
+    if (!req.user) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+    return this.usersService.createAddress(req.user.id, dto);
   }
 
   @Get()
