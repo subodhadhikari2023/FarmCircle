@@ -382,6 +382,18 @@ describe('OrdersService', () => {
       });
       expect(result).toEqual(orders);
     });
+
+    it("returns only orders on the requesting Grower's own listings", async () => {
+      const orders = [{ id: 'o1', listingId: 'l1' }];
+      mockPrismaService.order.findMany.mockResolvedValue(orders);
+
+      const result = await service.findAllForUser('grower1', Role.GROWER);
+
+      expect(mockPrismaService.order.findMany).toHaveBeenCalledWith({
+        where: { listing: { ownerId: 'grower1' } },
+      });
+      expect(result).toEqual(orders);
+    });
   });
 
   describe('findOne', () => {
@@ -425,6 +437,34 @@ describe('OrdersService', () => {
       const result = await service.findOne('admin1', Role.ADMIN, 'o1');
 
       expect(result).toEqual({ ...order, statusHistory: [] });
+    });
+
+    it("throws ForbiddenException when a Grower does not own the order's listing", async () => {
+      const order = { id: 'o1', buyerId: 'someoneElse', listingId: 'l1' };
+      mockPrismaService.order.findUnique.mockResolvedValue(order);
+      mockPrismaService.listing.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.findOne('grower1', Role.GROWER, 'o1'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockPrismaService.listing.findFirst).toHaveBeenCalledWith({
+        where: { id: 'l1', ownerId: 'grower1' },
+      });
+    });
+
+    it("returns the order for a Grower who owns the order's listing", async () => {
+      const order = { id: 'o1', buyerId: 'someoneElse', listingId: 'l1' };
+      mockPrismaService.order.findUnique.mockResolvedValue(order);
+      mockPrismaService.listing.findFirst.mockResolvedValue({
+        id: 'l1',
+        ownerId: 'grower1',
+      });
+      const history = [{ orderId: 'o1', status: OrderStatus.PLACED }];
+      stubHistory(history);
+
+      const result = await service.findOne('grower1', Role.GROWER, 'o1');
+
+      expect(result).toEqual({ ...order, statusHistory: history });
     });
   });
 
