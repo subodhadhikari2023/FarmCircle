@@ -414,5 +414,185 @@ describe('ReviewModule (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(404);
     });
+
+    it('returns 409 when the review is already hidden', async () => {
+      const setup = await createFulfillableSetup(
+        'hide-twice',
+        OrderStatus.DELIVERED,
+      );
+      const created = await request(app.getHttpServer())
+        .post('/reviews')
+        .set('Authorization', `Bearer ${setup.buyerToken}`)
+        .send({ orderId: setup.order.id, rating: 5 })
+        .expect(201);
+      const reviewId = (created.body as { id: string }).id;
+      createdReviewIds.push(reviewId);
+
+      const admin = await createUser(Role.ADMIN, 'hide-twice-admin');
+      const adminToken = await loginAndGetToken(admin.email);
+      await request(app.getHttpServer())
+        .patch(`/reviews/${reviewId}/hide`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .patch(`/reviews/${reviewId}/hide`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(409);
+    });
+  });
+
+  describe('GET /reviews/hidden', () => {
+    it('returns 401 without a token', () => {
+      return request(app.getHttpServer()).get('/reviews/hidden').expect(401);
+    });
+
+    it('returns 403 for a non-Admin', async () => {
+      const customer = await createUser(Role.CUSTOMER, 'hidden-nonadmin');
+      const token = await loginAndGetToken(customer.email);
+
+      await request(app.getHttpServer())
+        .get('/reviews/hidden')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+    });
+
+    it('lists reviews an Admin has hidden, and only those', async () => {
+      const setup = await createFulfillableSetup(
+        'listhidden-happy',
+        OrderStatus.DELIVERED,
+      );
+      const created = await request(app.getHttpServer())
+        .post('/reviews')
+        .set('Authorization', `Bearer ${setup.buyerToken}`)
+        .send({ orderId: setup.order.id, rating: 2 })
+        .expect(201);
+      const reviewId = (created.body as { id: string }).id;
+      createdReviewIds.push(reviewId);
+
+      const admin = await createUser(Role.ADMIN, 'listhidden-admin');
+      const adminToken = await loginAndGetToken(admin.email);
+
+      const beforeHide = await request(app.getHttpServer())
+        .get('/reviews/hidden')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(
+        (beforeHide.body as Array<{ id: string }>).map((r) => r.id),
+      ).not.toContain(reviewId);
+
+      await request(app.getHttpServer())
+        .patch(`/reviews/${reviewId}/hide`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const afterHide = await request(app.getHttpServer())
+        .get('/reviews/hidden')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(
+        (afterHide.body as Array<{ id: string }>).map((r) => r.id),
+      ).toContain(reviewId);
+    });
+  });
+
+  describe('PATCH /reviews/:id/unhide', () => {
+    it('returns 401 without a token', () => {
+      return request(app.getHttpServer())
+        .patch('/reviews/irrelevant/unhide')
+        .expect(401);
+    });
+
+    it('returns 403 for a non-Admin', async () => {
+      const setup = await createFulfillableSetup(
+        'unhide-nonadmin',
+        OrderStatus.DELIVERED,
+      );
+      const created = await request(app.getHttpServer())
+        .post('/reviews')
+        .set('Authorization', `Bearer ${setup.buyerToken}`)
+        .send({ orderId: setup.order.id, rating: 5 })
+        .expect(201);
+      const reviewId = (created.body as { id: string }).id;
+      createdReviewIds.push(reviewId);
+
+      await request(app.getHttpServer())
+        .patch(`/reviews/${reviewId}/unhide`)
+        .set('Authorization', `Bearer ${setup.buyerToken}`)
+        .expect(403);
+    });
+
+    it('returns 404 for an unknown review', async () => {
+      const admin = await createUser(Role.ADMIN, 'unhide-unknown-admin');
+      const adminToken = await loginAndGetToken(admin.email);
+
+      await request(app.getHttpServer())
+        .patch('/reviews/00000000-0000-0000-0000-000000000000/unhide')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(404);
+    });
+
+    it('returns 409 when the review is not hidden', async () => {
+      const setup = await createFulfillableSetup(
+        'unhide-notyethidden',
+        OrderStatus.DELIVERED,
+      );
+      const created = await request(app.getHttpServer())
+        .post('/reviews')
+        .set('Authorization', `Bearer ${setup.buyerToken}`)
+        .send({ orderId: setup.order.id, rating: 5 })
+        .expect(201);
+      const reviewId = (created.body as { id: string }).id;
+      createdReviewIds.push(reviewId);
+
+      const admin = await createUser(Role.ADMIN, 'unhide-notyethidden-admin');
+      const adminToken = await loginAndGetToken(admin.email);
+
+      await request(app.getHttpServer())
+        .patch(`/reviews/${reviewId}/unhide`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(409);
+    });
+
+    it('restores a hidden review to GET /reviews', async () => {
+      const setup = await createFulfillableSetup(
+        'unhide-happy',
+        OrderStatus.DELIVERED,
+      );
+      const created = await request(app.getHttpServer())
+        .post('/reviews')
+        .set('Authorization', `Bearer ${setup.buyerToken}`)
+        .send({ orderId: setup.order.id, rating: 5 })
+        .expect(201);
+      const reviewId = (created.body as { id: string }).id;
+      createdReviewIds.push(reviewId);
+
+      const admin = await createUser(Role.ADMIN, 'unhide-happy-admin');
+      const adminToken = await loginAndGetToken(admin.email);
+
+      await request(app.getHttpServer())
+        .patch(`/reviews/${reviewId}/hide`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const hiddenListing = await request(app.getHttpServer())
+        .get('/reviews')
+        .expect(200);
+      expect(
+        (hiddenListing.body as Array<{ id: string }>).map((r) => r.id),
+      ).not.toContain(reviewId);
+
+      await request(app.getHttpServer())
+        .patch(`/reviews/${reviewId}/unhide`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      const restoredListing = await request(app.getHttpServer())
+        .get('/reviews')
+        .expect(200);
+      expect(
+        (restoredListing.body as Array<{ id: string }>).map((r) => r.id),
+      ).toContain(reviewId);
+    });
   });
 });

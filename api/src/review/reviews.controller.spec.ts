@@ -12,6 +12,8 @@ describe('ReviewsController', () => {
     findAll: jest.fn(),
     findOne: jest.fn(),
     hide: jest.fn(),
+    findHidden: jest.fn(),
+    unhide: jest.fn(),
   };
 
   const mockRequest = {
@@ -78,6 +80,30 @@ describe('ReviewsController', () => {
       const result = await controller.hide('r1');
 
       expect(mockReviewsService.hide).toHaveBeenCalledWith('r1');
+      expect(result).toEqual(review);
+    });
+  });
+
+  describe('findHidden', () => {
+    it('delegates to reviewsService.findHidden', async () => {
+      const reviews = [{ id: 'r1', isHidden: true }];
+      mockReviewsService.findHidden.mockResolvedValue(reviews);
+
+      const result = await controller.findHidden();
+
+      expect(mockReviewsService.findHidden).toHaveBeenCalledWith();
+      expect(result).toEqual(reviews);
+    });
+  });
+
+  describe('unhide', () => {
+    it('delegates to reviewsService.unhide with the id param', async () => {
+      const review = { id: 'r1', isHidden: false };
+      mockReviewsService.unhide.mockResolvedValue(review);
+
+      const result = await controller.unhide('r1');
+
+      expect(mockReviewsService.unhide).toHaveBeenCalledWith('r1');
       expect(result).toEqual(review);
     });
   });

@@ -201,5 +201,68 @@ describe('ReviewsService', () => {
       await expect(service.hide('r1')).rejects.toThrow(NotFoundException);
       expect(mockPrismaService.review.update).not.toHaveBeenCalled();
     });
+
+    it('throws ConflictException when the review is already hidden', async () => {
+      mockPrismaService.review.findUnique.mockResolvedValue({
+        id: 'r1',
+        isHidden: true,
+      });
+
+      await expect(service.hide('r1')).rejects.toThrow(ConflictException);
+      expect(mockPrismaService.review.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findHidden', () => {
+    it('returns only hidden reviews', async () => {
+      const reviews = [
+        { id: 'r1', isHidden: true, reviewer: { name: 'Ada' } },
+      ];
+      mockPrismaService.review.findMany.mockResolvedValue(reviews);
+
+      const result = await service.findHidden();
+
+      expect(mockPrismaService.review.findMany).toHaveBeenCalledWith({
+        where: { isHidden: true },
+        include: { reviewer: { select: { name: true } } },
+      });
+      expect(result).toEqual(reviews);
+    });
+  });
+
+  describe('unhide', () => {
+    it('marks a hidden review as visible again', async () => {
+      mockPrismaService.review.findUnique.mockResolvedValue({
+        id: 'r1',
+        isHidden: true,
+      });
+      const updated = { id: 'r1', isHidden: false };
+      mockPrismaService.review.update.mockResolvedValue(updated);
+
+      const result = await service.unhide('r1');
+
+      expect(mockPrismaService.review.update).toHaveBeenCalledWith({
+        where: { id: 'r1' },
+        data: { isHidden: false },
+      });
+      expect(result).toEqual(updated);
+    });
+
+    it('throws NotFoundException when the review does not exist', async () => {
+      mockPrismaService.review.findUnique.mockResolvedValue(null);
+
+      await expect(service.unhide('r1')).rejects.toThrow(NotFoundException);
+      expect(mockPrismaService.review.update).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when the review is not hidden', async () => {
+      mockPrismaService.review.findUnique.mockResolvedValue({
+        id: 'r1',
+        isHidden: false,
+      });
+
+      await expect(service.unhide('r1')).rejects.toThrow(ConflictException);
+      expect(mockPrismaService.review.update).not.toHaveBeenCalled();
+    });
   });
 });
