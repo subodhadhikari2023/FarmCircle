@@ -126,7 +126,11 @@ describe('AuthController', () => {
       await controller.logout(mockRequest, mockResponse);
 
       expect(mockAuthService.logout).toHaveBeenCalledWith('a-refresh-token');
-      expect(clearCookieMock).toHaveBeenCalledWith('refreshToken');
+      expect(clearCookieMock).toHaveBeenCalledWith('refreshToken', {
+        httpOnly: true,
+        secure: false,
+        sameSite: 'strict',
+      });
     });
 
     it('still clears the cookie when no refreshToken cookie is present', async () => {
@@ -140,7 +144,11 @@ describe('AuthController', () => {
       await controller.logout(mockRequest, mockResponse);
 
       expect(mockAuthService.logout).toHaveBeenCalledWith(undefined);
-      expect(clearCookieMock).toHaveBeenCalledWith('refreshToken');
+      expect(clearCookieMock).toHaveBeenCalledWith('refreshToken', {
+        httpOnly: true,
+        secure: false,
+        sameSite: 'strict',
+      });
     });
   });
 
