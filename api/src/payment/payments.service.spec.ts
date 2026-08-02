@@ -18,6 +18,13 @@ import {
   PaymentMethod,
   DeliveryMethod,
 } from 'generated/prisma/enums';
+import { Prisma } from 'generated/prisma/client';
+
+const recordNotFoundError = () =>
+  new Prisma.PrismaClientKnownRequestError('Record not found', {
+    code: 'P2025',
+    clientVersion: 'test',
+  });
 
 const decimal = (n: number) => ({ toNumber: () => n });
 const KEY_SECRET = 'test-key-secret';
@@ -37,6 +44,7 @@ describe('PaymentsService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     listing: {
       findUniqueOrThrow: jest.fn(),
@@ -101,9 +109,17 @@ describe('PaymentsService', () => {
     const preBooking = {
       id: 'pb1',
       vendorId: 'v1',
+      listingId: 'l1',
       status: PreBookingStatus.AWAITING_PAYMENT,
       advanceAmount: decimal(140),
     };
+    const openListing = { id: 'l1', isClosed: false };
+
+    beforeEach(() => {
+      mockPrismaService.listing.findUniqueOrThrow.mockResolvedValue(
+        openListing,
+      );
+    });
 
     it('throws NotFoundException when the pre-booking is not owned by the vendor', async () => {
       mockPrismaService.preBooking.findFirst.mockResolvedValue(null);
@@ -134,6 +150,19 @@ describe('PaymentsService', () => {
       await expect(
         service.createPreBookingPaymentIntent('v1', 'pb1'),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('throws ConflictException when the listing has been closed', async () => {
+      mockPrismaService.preBooking.findFirst.mockResolvedValue(preBooking);
+      mockPrismaService.listing.findUniqueOrThrow.mockResolvedValue({
+        id: 'l1',
+        isClosed: true,
+      });
+
+      await expect(
+        service.createPreBookingPaymentIntent('v1', 'pb1'),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrismaService.payment.findUnique).not.toHaveBeenCalled();
     });
 
     it('creates a Payment row and a Razorpay order when none exists yet', async () => {
@@ -351,6 +380,7 @@ describe('PaymentsService', () => {
       mockPrismaService.preBooking.findUnique.mockResolvedValue(preBooking);
       const listing = {
         id: 'l1',
+        isClosed: false,
         wholesalePrice: decimal(35),
         availableQuantity: decimal(100),
       };
@@ -371,7 +401,7 @@ describe('PaymentsService', () => {
         data: { razorpayPaymentId: 'pay_xyz', status: PaymentStatus.SUCCESS },
       });
       expect(mockPrismaService.preBooking.update).toHaveBeenCalledWith({
-        where: { id: 'pb1' },
+        where: { id: 'pb1', status: PreBookingStatus.AWAITING_PAYMENT },
         data: { status: PreBookingStatus.CONFIRMED },
       });
       expect(mockPrismaService.order.create).toHaveBeenCalledWith({
@@ -387,8 +417,8 @@ describe('PaymentsService', () => {
         },
       });
       expect(mockPrismaService.listing.update).toHaveBeenCalledWith({
-        where: { id: 'l1' },
-        data: { availableQuantity: 60 },
+        where: { id: 'l1', isClosed: false, availableQuantity: { gte: 40 } },
+        data: { availableQuantity: { decrement: 40 } },
       });
       expect(mockHistoryModel.create).toHaveBeenCalledWith({
         orderId: 'order1',
@@ -396,6 +426,84 @@ describe('PaymentsService', () => {
         changedBy: 'v1',
       });
       expect(mockRedisService.clearPaymentHold).toHaveBeenCalledWith('pb1');
+      expect(result).toEqual({ received: true });
+    });
+
+    it('records the captured payment without creating an order when the cron sweep already expired the hold', async () => {
+      const body = buildBody('order_abc', 'pay_xyz');
+      mockPrismaService.payment.findFirst.mockResolvedValue({
+        id: 'pay1',
+        preBookingId: 'pb1',
+        status: PaymentStatus.PENDING,
+      });
+      mockPrismaService.preBooking.findUnique.mockResolvedValue({
+        id: 'pb1',
+        listingId: 'l1',
+        status: PreBookingStatus.EXPIRED,
+      });
+
+      const result = await service.handleWebhook(body, sign(body));
+
+      expect(mockPrismaService.payment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'pay1', status: { not: PaymentStatus.SUCCESS } },
+        data: { razorpayPaymentId: 'pay_xyz', status: PaymentStatus.SUCCESS },
+      });
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(result).toEqual({ received: true });
+    });
+
+    it('records the captured payment without creating an order when the listing has since been closed', async () => {
+      const body = buildBody('order_abc', 'pay_xyz');
+      mockPrismaService.payment.findFirst.mockResolvedValue({
+        id: 'pay1',
+        preBookingId: 'pb1',
+      });
+      mockPrismaService.preBooking.findUnique.mockResolvedValue({
+        id: 'pb1',
+        listingId: 'l1',
+        status: PreBookingStatus.AWAITING_PAYMENT,
+      });
+      mockPrismaService.listing.findUniqueOrThrow.mockResolvedValue({
+        id: 'l1',
+        isClosed: true,
+      });
+
+      const result = await service.handleWebhook(body, sign(body));
+
+      expect(mockPrismaService.payment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'pay1', status: { not: PaymentStatus.SUCCESS } },
+        data: { razorpayPaymentId: 'pay_xyz', status: PaymentStatus.SUCCESS },
+      });
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(result).toEqual({ received: true });
+    });
+
+    it('records the captured payment without creating an order when the guarded transaction loses a concurrency race', async () => {
+      const body = buildBody('order_abc', 'pay_xyz');
+      mockPrismaService.payment.findFirst.mockResolvedValue({
+        id: 'pay1',
+        preBookingId: 'pb1',
+      });
+      mockPrismaService.preBooking.findUnique.mockResolvedValue({
+        id: 'pb1',
+        listingId: 'l1',
+        quantity: decimal(40),
+        status: PreBookingStatus.AWAITING_PAYMENT,
+      });
+      mockPrismaService.listing.findUniqueOrThrow.mockResolvedValue({
+        id: 'l1',
+        isClosed: false,
+        wholesalePrice: decimal(35),
+        availableQuantity: decimal(100),
+      });
+      mockPrismaService.$transaction.mockRejectedValue(recordNotFoundError());
+
+      const result = await service.handleWebhook(body, sign(body));
+
+      expect(mockPrismaService.payment.updateMany).toHaveBeenCalledWith({
+        where: { id: 'pay1', status: { not: PaymentStatus.SUCCESS } },
+        data: { razorpayPaymentId: 'pay_xyz', status: PaymentStatus.SUCCESS },
+      });
       expect(result).toEqual({ received: true });
     });
 

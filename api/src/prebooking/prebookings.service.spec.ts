@@ -28,6 +28,7 @@ describe('PreBookingsService', () => {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
   };
 
@@ -300,6 +301,7 @@ describe('PreBookingsService', () => {
         status: PreBookingStatus.AWAITING_PAYMENT,
       };
       mockPrismaService.preBooking.findMany.mockResolvedValue([overdue]);
+      mockPrismaService.preBooking.updateMany.mockResolvedValue({ count: 1 });
 
       await service.expireOverdueHolds();
 
@@ -309,8 +311,8 @@ describe('PreBookingsService', () => {
           holdExpiresAt: { lt: expect.any(Date) as Date },
         },
       });
-      expect(mockPrismaService.preBooking.update).toHaveBeenCalledWith({
-        where: { id: 'pb1' },
+      expect(mockPrismaService.preBooking.updateMany).toHaveBeenCalledWith({
+        where: { id: 'pb1', status: PreBookingStatus.AWAITING_PAYMENT },
         data: { status: PreBookingStatus.EXPIRED },
       });
       expect(mockRedisService.releaseQueueCapacity).toHaveBeenCalledWith(
@@ -325,8 +327,24 @@ describe('PreBookingsService', () => {
 
       await service.expireOverdueHolds();
 
-      expect(mockPrismaService.preBooking.update).not.toHaveBeenCalled();
+      expect(mockPrismaService.preBooking.updateMany).not.toHaveBeenCalled();
       expect(mockRedisService.releaseQueueCapacity).not.toHaveBeenCalled();
+    });
+
+    it('does not release capacity when a concurrent webhook already confirmed the pre-booking (guard matches zero rows)', async () => {
+      const overdue = {
+        id: 'pb1',
+        batchId: 'b1',
+        quantity: decimal(20),
+        status: PreBookingStatus.AWAITING_PAYMENT,
+      };
+      mockPrismaService.preBooking.findMany.mockResolvedValue([overdue]);
+      mockPrismaService.preBooking.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.expireOverdueHolds();
+
+      expect(mockRedisService.releaseQueueCapacity).not.toHaveBeenCalled();
+      expect(mockRedisService.clearPaymentHold).not.toHaveBeenCalled();
     });
   });
 

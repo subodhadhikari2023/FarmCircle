@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UnauthorizedException,
   UseGuards,
@@ -37,16 +38,16 @@ export class ReviewsController {
   }
 
   @Get()
-  findAll() {
-    return this.reviewsService.findAll();
+  findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.reviewsService.findAll(page, limit);
   }
 
   // Registered before ':id' — otherwise Nest would match "hidden" as an id.
   @Get('hidden')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  findHidden() {
-    return this.reviewsService.findHidden();
+  findHidden(@Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.reviewsService.findHidden(page, limit);
   }
 
   @Get(':id')

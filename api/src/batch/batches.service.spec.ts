@@ -543,29 +543,109 @@ describe('BatchesService', () => {
   });
 
   describe('getTimeline', () => {
-    it('returns the batch with its milestone progress for public viewing', async () => {
-      const batch = {
-        id: 'b1',
-        milestoneProgress: [{ id: 'p1', order: 1 }],
-      };
-      mockPrismaService.batch.findUnique.mockResolvedValue(batch);
+    const trackedPublishedBatch = {
+      id: 'b1',
+      ownerId: 'grower1',
+      predictedYield: decimal(100),
+      quantity: decimal(50),
+      listing: { isPublished: true, hasTrackedCycle: true },
+      milestoneProgress: [
+        {
+          order: 1,
+          reachedAt: new Date('2026-02-01'),
+          milestone: { name: 'Sown', expectedDurationDays: 5 },
+        },
+        {
+          order: 2,
+          reachedAt: null,
+          milestone: { name: 'Harvested', expectedDurationDays: 10 },
+        },
+      ],
+    };
+
+    it('returns only the milestone timeline for a batch behind a published, tracked-path listing', async () => {
+      mockPrismaService.batch.findUnique.mockResolvedValue(
+        trackedPublishedBatch,
+      );
 
       const result = await service.getTimeline('b1');
 
       expect(mockPrismaService.batch.findUnique).toHaveBeenCalledWith({
         where: { id: 'b1' },
         include: {
+          listing: true,
           milestoneProgress: {
             orderBy: { order: 'asc' },
             include: { milestone: true },
           },
         },
       });
-      expect(result).toEqual(batch);
+      expect(result).toEqual({
+        batchId: 'b1',
+        milestones: [
+          {
+            name: 'Sown',
+            order: 1,
+            expectedDurationDays: 5,
+            reachedAt: new Date('2026-02-01'),
+          },
+          {
+            name: 'Harvested',
+            order: 2,
+            expectedDurationDays: 10,
+            reachedAt: null,
+          },
+        ],
+      });
+    });
+
+    it('never exposes Grower-only batch fields like predictedYield, quantity, or ownerId', async () => {
+      mockPrismaService.batch.findUnique.mockResolvedValue(
+        trackedPublishedBatch,
+      );
+
+      const result = await service.getTimeline('b1');
+
+      expect(result).not.toHaveProperty('predictedYield');
+      expect(result).not.toHaveProperty('quantity');
+      expect(result).not.toHaveProperty('ownerId');
     });
 
     it('throws NotFoundException when the batch does not exist', async () => {
       mockPrismaService.batch.findUnique.mockResolvedValue(null);
+
+      await expect(service.getTimeline('b1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws NotFoundException when the batch has no listing yet', async () => {
+      mockPrismaService.batch.findUnique.mockResolvedValue({
+        ...trackedPublishedBatch,
+        listing: null,
+      });
+
+      await expect(service.getTimeline('b1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws NotFoundException when the listing is not yet published (draft awaiting harvest confirmation)', async () => {
+      mockPrismaService.batch.findUnique.mockResolvedValue({
+        ...trackedPublishedBatch,
+        listing: { isPublished: false, hasTrackedCycle: true },
+      });
+
+      await expect(service.getTimeline('b1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws NotFoundException when the listing is a direct-path listing (no tracked cycle)', async () => {
+      mockPrismaService.batch.findUnique.mockResolvedValue({
+        ...trackedPublishedBatch,
+        listing: { isPublished: true, hasTrackedCycle: false },
+      });
 
       await expect(service.getTimeline('b1')).rejects.toThrow(
         NotFoundException,

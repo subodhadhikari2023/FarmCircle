@@ -137,10 +137,17 @@ export class PreBookingsService {
     });
 
     for (const preBooking of overdue) {
-      await this.prisma.preBooking.update({
-        where: { id: preBooking.id },
+      // Guarded on status: if the Razorpay webhook confirmed this exact
+      // pre-booking in the gap between the findMany read above and this
+      // update, the guard matches zero rows and we must not release
+      // capacity that's now actually committed to a real order.
+      const { count } = await this.prisma.preBooking.updateMany({
+        where: { id: preBooking.id, status: PreBookingStatus.AWAITING_PAYMENT },
         data: { status: PreBookingStatus.EXPIRED },
       });
+      if (count === 0) {
+        continue;
+      }
       await this.redis.releaseQueueCapacity(
         preBooking.batchId,
         preBooking.quantity.toNumber(),
