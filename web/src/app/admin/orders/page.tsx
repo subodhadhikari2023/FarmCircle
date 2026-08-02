@@ -4,16 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { type Order, listMyOrders } from "@/lib/orders";
-
-const STATUS_LABEL: Record<Order["status"], string> = {
-  PLACED: "Placed",
-  CONFIRMED: "Confirmed",
-  OUT_FOR_DELIVERY: "Out for delivery",
-  READY_FOR_PICKUP: "Ready for pickup",
-  DELIVERED: "Delivered",
-  PICKED_UP: "Picked up",
-  CANCELLED: "Cancelled",
-};
+import { OrderStatusBadge } from "@/components/ui/status-badge";
+import { ListSkeleton } from "@/components/ui/list-skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default function AdminOrdersPage() {
   const { accessToken } = useAuth();
@@ -58,13 +51,13 @@ export default function AdminOrdersPage() {
 
       <div className="mt-10">
         {isLoading ? (
-          <p className="text-muted">Loading orders…</p>
+          <ListSkeleton />
         ) : loadError ? (
           <p role="alert" className="text-sm text-danger-700">
             {loadError}
           </p>
         ) : orders.length === 0 ? (
-          <p className="text-muted">No orders have been placed yet.</p>
+          <EmptyState icon="receipt_long">No orders have been placed yet.</EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {orders.map((order) => (
@@ -80,9 +73,7 @@ export default function AdminOrdersPage() {
                       {order.totalAmount}
                     </p>
                   </div>
-                  <span className="rounded-full bg-dark-slate-grey-100 px-2 py-0.5 text-xs font-medium text-dark-slate-grey-800">
-                    {STATUS_LABEL[order.status]}
-                  </span>
+                  <OrderStatusBadge status={order.status} />
                 </Link>
               </li>
             ))}

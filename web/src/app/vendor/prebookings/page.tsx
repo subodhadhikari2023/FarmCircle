@@ -4,6 +4,12 @@ import Link from "next/link";
 import Script from "next/script";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { PreBookingStatusBadge } from "@/components/ui/status-badge";
+import { PaymentDeadline } from "@/components/ui/payment-deadline";
+import { ListSkeleton } from "@/components/ui/list-skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   type PreBooking,
   cancelPreBooking,
@@ -12,16 +18,10 @@ import {
 } from "@/lib/prebookings";
 import { PayAdvanceButton } from "@/components/listings/pay-advance-button";
 
-const STATUS_LABEL: Record<PreBooking["status"], string> = {
-  QUEUED: "Queued",
-  AWAITING_PAYMENT: "Awaiting payment",
-  CONFIRMED: "Confirmed",
-  EXPIRED: "Expired",
-  CANCELLED: "Cancelled",
-};
-
 export default function VendorPreBookingsPage() {
   const { accessToken } = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const [preBookings, setPreBookings] = useState<PreBooking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,6 +61,14 @@ export default function VendorPreBookingsPage() {
 
   async function handleCancel(id: string) {
     if (!accessToken) return;
+    const confirmed = await confirm({
+      title: "Cancel this pre-booking?",
+      message: "This can't be undone.",
+      confirmLabel: "Cancel pre-booking",
+      cancelLabel: "Keep it",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setCancellingId(id);
     setCancelError(null);
     try {
@@ -68,6 +76,7 @@ export default function VendorPreBookingsPage() {
       setPreBookings((prev) =>
         prev.map((preBooking) => (preBooking.id === id ? updated : preBooking)),
       );
+      toast.show({ variant: "success", title: "Pre-booking cancelled" });
     } catch (err) {
       setCancelError(
         err instanceof Error ? err.message : "Couldn't cancel the pre-booking.",
@@ -88,19 +97,19 @@ export default function VendorPreBookingsPage() {
 
       <div className="mt-10">
         {isLoading ? (
-          <p className="text-muted">Loading pre-bookings…</p>
+          <ListSkeleton />
         ) : loadError ? (
           <p role="alert" className="text-sm text-danger-700">
             {loadError}
           </p>
         ) : preBookings.length === 0 ? (
-          <p className="text-muted">
+          <EmptyState icon="bookmark">
             No pre-bookings yet —{" "}
             <Link href="/vendor/upcoming" className="text-primary-text hover:underline">
               browse upcoming yield
             </Link>{" "}
             to request one.
-          </p>
+          </EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {preBookings.map((preBooking) => (
@@ -115,15 +124,10 @@ export default function VendorPreBookingsPage() {
                   </p>
                   {preBooking.status === "AWAITING_PAYMENT" &&
                     preBooking.holdExpiresAt && (
-                      <p className="mt-1 text-xs text-muted">
-                        Advance due by{" "}
-                        {new Date(preBooking.holdExpiresAt).toLocaleString()}
-                      </p>
+                      <PaymentDeadline expiresAt={preBooking.holdExpiresAt} />
                     )}
                 </div>
-                <span className="rounded-full bg-frosted-blue-50 px-2 py-0.5 text-xs font-medium text-frosted-blue-800">
-                  {STATUS_LABEL[preBooking.status]}
-                </span>
+                <PreBookingStatusBadge status={preBooking.status} />
                 {isPreBookingCancellable(preBooking.status) && (
                   <button
                     type="button"
@@ -145,9 +149,14 @@ export default function VendorPreBookingsPage() {
                       preBookingId={preBooking.id}
                       advanceAmount={preBooking.advanceAmount}
                       razorpayReady={razorpayReady}
-                      onPaid={() =>
-                        setJustPaidIds((prev) => new Set(prev).add(preBooking.id))
-                      }
+                      onPaid={() => {
+                        setJustPaidIds((prev) => new Set(prev).add(preBooking.id));
+                        toast.show({
+                          variant: "success",
+                          title: "Advance payment received",
+                          message: "Confirming your pre-booking shortly.",
+                        });
+                      }}
                     />
                   ))}
               </li>

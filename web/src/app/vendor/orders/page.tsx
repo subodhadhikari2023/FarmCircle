@@ -5,23 +5,19 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { type Order, listMyOrders } from "@/lib/orders";
-
-const STATUS_LABEL: Record<Order["status"], string> = {
-  PLACED: "Placed",
-  CONFIRMED: "Confirmed",
-  OUT_FOR_DELIVERY: "Out for delivery",
-  READY_FOR_PICKUP: "Ready for pickup",
-  DELIVERED: "Delivered",
-  PICKED_UP: "Picked up",
-  CANCELLED: "Cancelled",
-};
+import { OrderStatusBadge } from "@/components/ui/status-badge";
+import { ListSkeleton } from "@/components/ui/list-skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 function PaymentProcessingBanner() {
   const searchParams = useSearchParams();
   if (searchParams.get("paid") !== "1") return null;
 
   return (
-    <p className="mt-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-foreground">
+    <p className="mt-4 flex items-center gap-2 rounded-md border border-success-100 bg-success-100 px-4 py-3 text-sm text-success-800">
+      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+        check_circle
+      </span>
       Payment received — your order will appear here shortly.
     </p>
   );
@@ -69,19 +65,19 @@ export default function VendorOrdersPage() {
 
       <div className="mt-10">
         {isLoading ? (
-          <p className="text-muted">Loading orders…</p>
+          <ListSkeleton />
         ) : loadError ? (
           <p role="alert" className="text-sm text-danger-700">
             {loadError}
           </p>
         ) : orders.length === 0 ? (
-          <p className="text-muted">
+          <EmptyState icon="receipt_long">
             No orders yet —{" "}
             <Link href="/vendor" className="text-primary-text hover:underline">
               browse the circle
             </Link>{" "}
             to place your first one.
-          </p>
+          </EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {orders.map((order) => (
@@ -99,9 +95,7 @@ export default function VendorOrdersPage() {
                         : "Pickup"}
                     </p>
                   </div>
-                  <span className="rounded-full bg-frosted-blue-50 px-2 py-0.5 text-xs font-medium text-frosted-blue-800">
-                    {STATUS_LABEL[order.status]}
-                  </span>
+                  <OrderStatusBadge status={order.status} />
                 </Link>
               </li>
             ))}

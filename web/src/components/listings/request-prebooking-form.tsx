@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
 import { createPreBooking } from "@/lib/prebookings";
 
 const INPUT_CLASS =
@@ -19,6 +20,7 @@ export function RequestPreBookingForm({
 }) {
   const { user, status, accessToken } = useAuth();
   const router = useRouter();
+  const toast = useToast();
 
   const [quantity, setQuantity] = useState("1");
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -42,6 +44,11 @@ export function RequestPreBookingForm({
     setIsSubmitting(true);
     try {
       await createPreBooking(accessToken, { batchId, quantity: parsedQuantity });
+      toast.show({
+        variant: "success",
+        title: "Pre-booking requested",
+        message: "You'll pay a 20% advance once the batch is harvest-ready.",
+      });
       router.push("/vendor/prebookings");
     } catch (err) {
       setSubmitError(
@@ -85,8 +92,11 @@ export function RequestPreBookingForm({
       <button
         type="submit"
         disabled={isSubmitting}
-        className="self-start rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+        className="flex items-center gap-1.5 self-start rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
       >
+        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+          bookmark_add
+        </span>
         {isSubmitting ? "Requesting…" : "Request pre-booking"}
       </button>
     </form>

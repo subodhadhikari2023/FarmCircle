@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
+import { ToastProvider } from "@/components/ui/toast";
+import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import "material-symbols/outlined.css";
 import "./globals.css";
 
@@ -41,7 +43,11 @@ export default function RootLayout({
       className={`${spaceGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <AuthProvider>{children}</AuthProvider>
+        <ToastProvider>
+          <ConfirmDialogProvider>
+            <AuthProvider>{children}</AuthProvider>
+          </ConfirmDialogProvider>
+        </ToastProvider>
       </body>
     </html>
   );

@@ -5,6 +5,7 @@ import Script from "next/script";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
 import { ROLE_HOME } from "@/lib/roles";
 import { type Address, listAddresses } from "@/lib/addresses";
 import {
@@ -25,6 +26,7 @@ export function PlaceOrderForm({
 }) {
   const { user, status, accessToken } = useAuth();
   const router = useRouter();
+  const toast = useToast();
 
   const [quantity, setQuantity] = useState("1");
   const [deliveryMethod, setDeliveryMethod] = useState<"PICKUP" | "DELIVERY">(
@@ -114,6 +116,11 @@ export function PlaceOrderForm({
       });
 
       if (!isOrderIntentPayment(result)) {
+        toast.show({
+          variant: "success",
+          title: "Order placed",
+          message: "The grower will start preparing it shortly.",
+        });
         router.push(`${roleHome}/orders/${result.id}`);
         return;
       }
@@ -140,6 +147,11 @@ export function PlaceOrderForm({
                 razorpayOrderId: response.razorpay_order_id,
                 razorpayPaymentId: response.razorpay_payment_id,
                 razorpaySignature: response.razorpay_signature,
+              });
+              toast.show({
+                variant: "success",
+                title: "Payment received",
+                message: "Your order will appear in My orders shortly.",
               });
               router.push(`${roleHome}/orders?paid=1`);
             } catch (err) {
@@ -294,8 +306,11 @@ export function PlaceOrderForm({
           isSubmitting ||
           (deliveryMethod === "DELIVERY" && addresses.length === 0)
         }
-        className="rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+        className="flex items-center justify-center gap-1.5 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
       >
+        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+          shopping_cart_checkout
+        </span>
         {isSubmitting ? "Placing order…" : "Place order"}
       </button>
 

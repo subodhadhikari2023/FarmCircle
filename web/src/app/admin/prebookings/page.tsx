@@ -3,14 +3,10 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { type PreBooking, listMyPreBookings } from "@/lib/prebookings";
-
-const STATUS_LABEL: Record<PreBooking["status"], string> = {
-  QUEUED: "Queued",
-  AWAITING_PAYMENT: "Awaiting payment",
-  CONFIRMED: "Confirmed",
-  EXPIRED: "Expired",
-  CANCELLED: "Cancelled",
-};
+import { PreBookingStatusBadge } from "@/components/ui/status-badge";
+import { PaymentDeadline } from "@/components/ui/payment-deadline";
+import { ListSkeleton } from "@/components/ui/list-skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default function AdminPreBookingsPage() {
   const { accessToken } = useAuth();
@@ -58,13 +54,13 @@ export default function AdminPreBookingsPage() {
 
       <div className="mt-10">
         {isLoading ? (
-          <p className="text-muted">Loading pre-bookings…</p>
+          <ListSkeleton />
         ) : loadError ? (
           <p role="alert" className="text-sm text-danger-700">
             {loadError}
           </p>
         ) : preBookings.length === 0 ? (
-          <p className="text-muted">No pre-bookings have been placed yet.</p>
+          <EmptyState icon="bookmark">No pre-bookings have been placed yet.</EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {preBookings.map((preBooking) => (
@@ -87,15 +83,10 @@ export default function AdminPreBookingsPage() {
                   </p>
                   {preBooking.status === "AWAITING_PAYMENT" &&
                     preBooking.holdExpiresAt && (
-                      <p className="mt-1 text-xs text-muted">
-                        Advance due by{" "}
-                        {new Date(preBooking.holdExpiresAt).toLocaleString()}
-                      </p>
+                      <PaymentDeadline expiresAt={preBooking.holdExpiresAt} />
                     )}
                 </div>
-                <span className="rounded-full bg-dark-slate-grey-100 px-2 py-0.5 text-xs font-medium text-dark-slate-grey-800">
-                  {STATUS_LABEL[preBooking.status]}
-                </span>
+                <PreBookingStatusBadge status={preBooking.status} />
               </li>
             ))}
           </ul>
