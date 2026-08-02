@@ -8,6 +8,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CatalogModule } from './catalog/catalog.module';
@@ -31,6 +32,7 @@ import { ReviewModule } from './review/review.module';
     MongooseModule.forRoot(process.env.MONGO_URL as string),
     PrismaModule,
     RedisModule,
+    HealthModule,
     AuthModule,
     UsersModule,
     CatalogModule,
