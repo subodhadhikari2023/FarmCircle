@@ -170,7 +170,7 @@ describe('ReviewsService', () => {
   });
 
   describe('findAll', () => {
-    it('returns only non-hidden reviews', async () => {
+    it('returns only non-hidden reviews, newest first, defaulting to page 1 of 20', async () => {
       const reviews = [
         { id: 'r1', isHidden: false, reviewer: { name: 'Ada' } },
       ];
@@ -181,8 +181,31 @@ describe('ReviewsService', () => {
       expect(mockPrismaService.review.findMany).toHaveBeenCalledWith({
         where: { isHidden: false },
         include: { reviewer: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip: 0,
+        take: 20,
       });
       expect(result).toEqual(reviews);
+    });
+
+    it('applies the requested page/limit', async () => {
+      mockPrismaService.review.findMany.mockResolvedValue([]);
+
+      await service.findAll('3', '10');
+
+      expect(mockPrismaService.review.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 20, take: 10 }),
+      );
+    });
+
+    it('clamps an oversized limit to the max page size and an invalid page to 1', async () => {
+      mockPrismaService.review.findMany.mockResolvedValue([]);
+
+      await service.findAll('0', '1000');
+
+      expect(mockPrismaService.review.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 0, take: 100 }),
+      );
     });
   });
 
@@ -249,7 +272,7 @@ describe('ReviewsService', () => {
   });
 
   describe('findHidden', () => {
-    it('returns only hidden reviews', async () => {
+    it('returns only hidden reviews, newest first, defaulting to page 1 of 20', async () => {
       const reviews = [{ id: 'r1', isHidden: true, reviewer: { name: 'Ada' } }];
       mockPrismaService.review.findMany.mockResolvedValue(reviews);
 
@@ -258,6 +281,9 @@ describe('ReviewsService', () => {
       expect(mockPrismaService.review.findMany).toHaveBeenCalledWith({
         where: { isHidden: true },
         include: { reviewer: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip: 0,
+        take: 20,
       });
       expect(result).toEqual(reviews);
     });

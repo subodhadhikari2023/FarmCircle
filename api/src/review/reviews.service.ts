@@ -13,6 +13,18 @@ const REVIEWABLE_STATUSES: OrderStatus[] = [
   OrderStatus.PICKED_UP,
 ];
 
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+
+function paginationParams(page?: string, limit?: string) {
+  const pageNumber = Math.max(1, Math.trunc(Number(page)) || 1);
+  const pageSize = Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, Math.trunc(Number(limit)) || DEFAULT_PAGE_SIZE),
+  );
+  return { skip: (pageNumber - 1) * pageSize, take: pageSize };
+}
+
 @Injectable()
 export class ReviewsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -63,10 +75,14 @@ export class ReviewsService {
     }
   }
 
-  findAll() {
+  findAll(page?: string, limit?: string) {
+    const { skip, take } = paginationParams(page, limit);
     return this.prisma.review.findMany({
       where: { isHidden: false },
       include: { reviewer: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take,
     });
   }
 
@@ -92,10 +108,14 @@ export class ReviewsService {
     });
   }
 
-  findHidden() {
+  findHidden(page?: string, limit?: string) {
+    const { skip, take } = paginationParams(page, limit);
     return this.prisma.review.findMany({
       where: { isHidden: true },
       include: { reviewer: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take,
     });
   }
 

@@ -49,13 +49,13 @@ describe('ReviewsController', () => {
   });
 
   describe('findAll', () => {
-    it('delegates to reviewsService.findAll', async () => {
+    it('delegates to reviewsService.findAll with the page/limit query params', async () => {
       const reviews = [{ id: 'r1' }];
       mockReviewsService.findAll.mockResolvedValue(reviews);
 
-      const result = await controller.findAll();
+      const result = await controller.findAll('2', '10');
 
-      expect(mockReviewsService.findAll).toHaveBeenCalledWith();
+      expect(mockReviewsService.findAll).toHaveBeenCalledWith('2', '10');
       expect(result).toEqual(reviews);
     });
   });
@@ -85,13 +85,13 @@ describe('ReviewsController', () => {
   });
 
   describe('findHidden', () => {
-    it('delegates to reviewsService.findHidden', async () => {
+    it('delegates to reviewsService.findHidden with the page/limit query params', async () => {
       const reviews = [{ id: 'r1', isHidden: true }];
       mockReviewsService.findHidden.mockResolvedValue(reviews);
 
-      const result = await controller.findHidden();
+      const result = await controller.findHidden('1', '20');
 
-      expect(mockReviewsService.findHidden).toHaveBeenCalledWith();
+      expect(mockReviewsService.findHidden).toHaveBeenCalledWith('1', '20');
       expect(result).toEqual(reviews);
     });
   });

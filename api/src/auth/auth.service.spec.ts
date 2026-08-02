@@ -37,6 +37,7 @@ describe('AuthService', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
+      deleteMany: jest.fn(),
     },
   };
 
@@ -680,6 +681,25 @@ describe('AuthService', () => {
         select: { id: true, email: true, name: true, role: true },
       });
       expect(result).toEqual(createdUser);
+    });
+  });
+
+  describe('cleanupStaleRefreshTokens', () => {
+    it('deletes rows that are expired or revoked', async () => {
+      mockPrismaService.refreshToken.deleteMany.mockResolvedValue({
+        count: 4,
+      });
+
+      await service.cleanupStaleRefreshTokens();
+
+      expect(mockPrismaService.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { expiresAt: { lt: expect.any(Date) as Date } },
+            { revokedAt: { not: null } },
+          ],
+        },
+      });
     });
   });
 });

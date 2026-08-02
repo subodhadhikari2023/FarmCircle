@@ -237,6 +237,8 @@ model Listing {
   orders       Order[]
   orderIntents OrderIntent[]
   preBookings  PreBooking[]
+
+  @@index([ownerId])
 }
 
 // ─── Orders ─────────────────────────────────────────────
@@ -276,6 +278,10 @@ model Order {
 
   payment Payment?
   review  Review?
+
+  @@index([buyerId])
+  @@index([listingId])
+  @@index([status])
 }
 
 // Snapshot of a would-be Order's details, created for UPI/ONLINE checkouts
@@ -319,6 +325,10 @@ model PreBooking {
 
   order   Order?
   payment Payment?
+
+  @@index([vendorId])
+  @@index([batchId])
+  @@index([status])
 }
 
 // ─── Payments ───────────────────────────────────────────
@@ -339,6 +349,8 @@ model Payment {
   status             PaymentStatus @default(PENDING)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
+
+  @@index([razorpayOrderId])
 }
 
 // ─── Reviews ────────────────────────────────────────────
