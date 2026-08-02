@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { OrderStatusBadge } from "@/components/ui/status-badge";
 import {
   type OrderDetail,
   cancelOrder,
@@ -29,6 +32,8 @@ const INPUT_CLASS =
 export default function VendorOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { accessToken } = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -67,11 +72,20 @@ export default function VendorOrderDetailPage() {
 
   async function handleCancel() {
     if (!accessToken || !order) return;
+    const confirmed = await confirm({
+      title: "Cancel this order?",
+      message: "This can't be undone — you'll need to place a new order if you change your mind.",
+      confirmLabel: "Cancel order",
+      cancelLabel: "Keep order",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setIsCancelling(true);
     setCancelError(null);
     try {
       const updated = await cancelOrder(accessToken, order.id);
       setOrder((prev) => (prev ? { ...prev, ...updated } : prev));
+      toast.show({ variant: "success", title: "Order cancelled" });
     } catch (err) {
       setCancelError(
         err instanceof Error ? err.message : "Couldn't cancel the order.",
@@ -93,6 +107,11 @@ export default function VendorOrderDetailPage() {
         comment: comment.trim() || undefined,
       });
       setReviewSubmitted(true);
+      toast.show({
+        variant: "success",
+        title: "Review submitted",
+        message: "Thanks for letting other buyers know how it went.",
+      });
     } catch (err) {
       setReviewError(
         err instanceof Error ? err.message : "Couldn't submit the review.",
@@ -134,9 +153,7 @@ export default function VendorOrderDetailPage() {
           <h1 className="font-display text-2xl font-[650] text-ink">Order</h1>
           <p className="mt-1 font-mono text-xs text-muted">{order.id}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-frosted-blue-50 px-3 py-1 text-xs font-medium text-frosted-blue-800">
-          {STATUS_LABEL[order.status]}
-        </span>
+        <OrderStatusBadge status={order.status} />
       </div>
 
       <div className="mt-8 rounded-md border border-border bg-surface p-5">

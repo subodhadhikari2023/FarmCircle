@@ -3,6 +3,7 @@ import type { Role } from "./auth-context";
 type RoleShellLink = {
   label: string;
   href: string;
+  icon: string;
 };
 
 type RoleShellConfig = {
@@ -27,11 +28,11 @@ export const ROLE_SHELL: Record<Role, RoleShellConfig> = {
     badgeBg: "bg-icy-aqua-50",
     badgeText: "text-icy-aqua-800",
     links: [
-      { label: "Crops", href: "/grower/crops" },
-      { label: "Cycles", href: "/grower/cycles" },
-      { label: "Batches", href: "/grower/batches" },
-      { label: "Listings", href: "/grower/listings" },
-      { label: "Orders", href: "/grower/orders" },
+      { label: "Crops", href: "/grower/crops", icon: "grass" },
+      { label: "Cycles", href: "/grower/cycles", icon: "cyclone" },
+      { label: "Batches", href: "/grower/batches", icon: "inventory_2" },
+      { label: "Listings", href: "/grower/listings", icon: "sell" },
+      { label: "Orders", href: "/grower/orders", icon: "receipt_long" },
     ],
   },
   VENDOR: {
@@ -41,11 +42,11 @@ export const ROLE_SHELL: Record<Role, RoleShellConfig> = {
     badgeBg: "bg-frosted-blue-50",
     badgeText: "text-frosted-blue-800",
     links: [
-      { label: "Browse", href: "/vendor" },
-      { label: "Pre-book", href: "/vendor/upcoming" },
-      { label: "My pre-bookings", href: "/vendor/prebookings" },
-      { label: "My orders", href: "/vendor/orders" },
-      { label: "Addresses", href: "/vendor/addresses" },
+      { label: "Browse", href: "/vendor", icon: "storefront" },
+      { label: "Pre-book", href: "/vendor/upcoming", icon: "event_available" },
+      { label: "My pre-bookings", href: "/vendor/prebookings", icon: "bookmark" },
+      { label: "My orders", href: "/vendor/orders", icon: "receipt_long" },
+      { label: "Addresses", href: "/vendor/addresses", icon: "location_on" },
     ],
   },
   CUSTOMER: {
@@ -55,9 +56,9 @@ export const ROLE_SHELL: Record<Role, RoleShellConfig> = {
     badgeBg: "bg-lavender-grey-100",
     badgeText: "text-lavender-grey-800",
     links: [
-      { label: "Browse", href: "/customer" },
-      { label: "My orders", href: "/customer/orders" },
-      { label: "Addresses", href: "/customer/addresses" },
+      { label: "Browse", href: "/customer", icon: "shopping_basket" },
+      { label: "My orders", href: "/customer/orders", icon: "receipt_long" },
+      { label: "Addresses", href: "/customer/addresses", icon: "location_on" },
     ],
   },
   ADMIN: {
@@ -67,10 +68,10 @@ export const ROLE_SHELL: Record<Role, RoleShellConfig> = {
     badgeBg: "bg-dark-slate-grey-100",
     badgeText: "text-dark-slate-grey-800",
     links: [
-      { label: "Users", href: "/admin/users" },
-      { label: "Orders", href: "/admin/orders" },
-      { label: "Pre-bookings", href: "/admin/prebookings" },
-      { label: "Reviews", href: "/admin/reviews" },
+      { label: "Users", href: "/admin/users", icon: "group" },
+      { label: "Orders", href: "/admin/orders", icon: "receipt_long" },
+      { label: "Pre-bookings", href: "/admin/prebookings", icon: "bookmark" },
+      { label: "Reviews", href: "/admin/reviews", icon: "reviews" },
     ],
   },
 };

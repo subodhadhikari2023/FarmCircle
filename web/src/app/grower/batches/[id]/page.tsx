@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
 import {
   type BatchDetail,
   addActivity,
@@ -23,6 +24,7 @@ function todayIsoDate() {
 export default function GrowerBatchDetailPage() {
   const { id: batchId } = useParams<{ id: string }>();
   const { accessToken } = useAuth();
+  const toast = useToast();
 
   const [batch, setBatch] = useState<BatchDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -85,6 +87,7 @@ export default function GrowerBatchDetailPage() {
     try {
       await advanceMilestone(accessToken, batchId, reachedAt);
       reload();
+      toast.show({ variant: "success", title: "Milestone advanced" });
     } catch (err) {
       setAdvanceError(
         err instanceof Error ? err.message : "Couldn't advance milestone.",
@@ -109,6 +112,7 @@ export default function GrowerBatchDetailPage() {
         preBookablePercent: Number(preBookablePercent),
       });
       setHasListingTerms(true);
+      toast.show({ variant: "success", title: "Listing terms set" });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Couldn't set listing terms.";
@@ -131,6 +135,11 @@ export default function GrowerBatchDetailPage() {
     try {
       await confirmHarvest(accessToken, batchId, Number(actualYield));
       reload();
+      toast.show({
+        variant: "success",
+        title: "Harvest confirmed",
+        message: "The listing is now live.",
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Couldn't confirm harvest.";
@@ -156,6 +165,7 @@ export default function GrowerBatchDetailPage() {
         prev ? { ...prev, activityLog: [...prev.activityLog, entry] } : prev,
       );
       setNote("");
+      toast.show({ variant: "success", title: "Activity logged" });
     } catch (err) {
       setActivityError(
         err instanceof Error ? err.message : "Couldn't log activity.",
@@ -255,64 +265,89 @@ export default function GrowerBatchDetailPage() {
             draft listing — confirming harvest below then publishes it.
           </p>
           <form onSubmit={handleSetTerms} className="mt-4 flex flex-col gap-3">
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                required
-                placeholder="Retail price (₹/kg)"
-                value={retailPrice}
-                onChange={(event) => setRetailPrice(event.target.value)}
-                className={INPUT_CLASS}
-                disabled={hasListingTerms}
-              />
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                required
-                placeholder="Wholesale price (₹/kg)"
-                value={wholesalePrice}
-                onChange={(event) => setWholesalePrice(event.target.value)}
-                className={INPUT_CLASS}
-                disabled={hasListingTerms}
-              />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="terms-retail-price" className="mb-1 block text-sm font-medium text-foreground">
+                  Retail price (₹/kg)
+                </label>
+                <input
+                  id="terms-retail-price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  value={retailPrice}
+                  onChange={(event) => setRetailPrice(event.target.value)}
+                  className={INPUT_CLASS}
+                  disabled={hasListingTerms}
+                />
+              </div>
+              <div>
+                <label htmlFor="terms-wholesale-price" className="mb-1 block text-sm font-medium text-foreground">
+                  Wholesale price (₹/kg)
+                </label>
+                <input
+                  id="terms-wholesale-price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  value={wholesalePrice}
+                  onChange={(event) => setWholesalePrice(event.target.value)}
+                  className={INPUT_CLASS}
+                  disabled={hasListingTerms}
+                />
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                required
-                placeholder="Min wholesale qty"
-                value={minWholesaleQty}
-                onChange={(event) => setMinWholesaleQty(event.target.value)}
-                className={INPUT_CLASS}
-                disabled={hasListingTerms}
-              />
-              <input
-                type="number"
-                min="5"
-                max="20"
-                required
-                placeholder="Retail ceiling % (5-20)"
-                value={retailCeilingPercent}
-                onChange={(event) => setRetailCeilingPercent(event.target.value)}
-                className={INPUT_CLASS}
-                disabled={hasListingTerms}
-              />
-              <input
-                type="number"
-                min="50"
-                max="70"
-                required
-                placeholder="Pre-bookable % (50-70)"
-                value={preBookablePercent}
-                onChange={(event) => setPreBookablePercent(event.target.value)}
-                className={INPUT_CLASS}
-                disabled={hasListingTerms}
-              />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div>
+                <label htmlFor="terms-min-wholesale-qty" className="mb-1 block text-sm font-medium text-foreground">
+                  Min wholesale qty (kg)
+                </label>
+                <input
+                  id="terms-min-wholesale-qty"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  value={minWholesaleQty}
+                  onChange={(event) => setMinWholesaleQty(event.target.value)}
+                  className={INPUT_CLASS}
+                  disabled={hasListingTerms}
+                />
+              </div>
+              <div>
+                <label htmlFor="terms-retail-ceiling" className="mb-1 block text-sm font-medium text-foreground">
+                  Retail ceiling % (5–20)
+                </label>
+                <input
+                  id="terms-retail-ceiling"
+                  type="number"
+                  min="5"
+                  max="20"
+                  required
+                  value={retailCeilingPercent}
+                  onChange={(event) => setRetailCeilingPercent(event.target.value)}
+                  className={INPUT_CLASS}
+                  disabled={hasListingTerms}
+                />
+              </div>
+              <div>
+                <label htmlFor="terms-prebookable" className="mb-1 block text-sm font-medium text-foreground">
+                  Pre-bookable % (50–70)
+                </label>
+                <input
+                  id="terms-prebookable"
+                  type="number"
+                  min="50"
+                  max="70"
+                  required
+                  value={preBookablePercent}
+                  onChange={(event) => setPreBookablePercent(event.target.value)}
+                  className={INPUT_CLASS}
+                  disabled={hasListingTerms}
+                />
+              </div>
             </div>
             <button
               type="submit"
@@ -396,8 +431,11 @@ export default function GrowerBatchDetailPage() {
         <button
           type="submit"
           disabled={isLoggingActivity}
-          className="shrink-0 rounded-sm border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface disabled:opacity-60"
+          className="flex shrink-0 items-center gap-1.5 rounded-sm border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface disabled:opacity-60"
         >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+            note_add
+          </span>
           {isLoggingActivity ? "Logging…" : "Log"}
         </button>
       </form>

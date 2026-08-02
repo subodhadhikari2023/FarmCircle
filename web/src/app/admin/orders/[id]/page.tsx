@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { OrderStatusBadge } from "@/components/ui/status-badge";
 import {
   type OrderDetail,
   type OrderStatus,
@@ -29,6 +32,8 @@ const SELECT_CLASS =
 export default function AdminOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { accessToken } = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -67,6 +72,19 @@ export default function AdminOrderDetailPage() {
   async function handleDispute(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!accessToken || !order) return;
+
+    if (targetStatus === "CANCELLED" && order.status !== "CANCELLED") {
+      const confirmed = await confirm({
+        title: "Override this order to Cancelled?",
+        message:
+          "This releases any reserved stock back to the listing and can't be undone from here.",
+        confirmLabel: "Cancel order",
+        cancelLabel: "Go back",
+        tone: "danger",
+      });
+      if (!confirmed) return;
+    }
+
     setIsSubmitting(true);
     setDisputeError(null);
     setDisputeSuccess(false);
@@ -74,6 +92,11 @@ export default function AdminOrderDetailPage() {
       const updated = await disputeOrder(accessToken, order.id, targetStatus);
       setOrder((prev) => (prev ? { ...prev, ...updated } : prev));
       setDisputeSuccess(true);
+      toast.show({
+        variant: "success",
+        title: "Order updated",
+        message: `Status set to ${STATUS_LABEL[updated.status]}.`,
+      });
     } catch (err) {
       setDisputeError(
         err instanceof Error ? err.message : "Couldn't update the order.",
@@ -121,9 +144,7 @@ export default function AdminOrderDetailPage() {
           <h1 className="font-display text-2xl font-[650] text-ink">Order</h1>
           <p className="mt-1 font-mono text-xs text-muted">{order.id}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-dark-slate-grey-100 px-3 py-1 text-xs font-medium text-dark-slate-grey-800">
-          {STATUS_LABEL[order.status]}
-        </span>
+        <OrderStatusBadge status={order.status} />
       </div>
 
       <div className="mt-8 rounded-md border border-border bg-surface p-5">

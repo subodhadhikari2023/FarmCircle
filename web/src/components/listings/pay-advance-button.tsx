@@ -89,8 +89,11 @@ export function PayAdvanceButton({
         type="button"
         disabled={isPaying}
         onClick={() => void handlePay()}
-        className="rounded-sm bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+        className="flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
       >
+        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+          payments
+        </span>
         {isPaying
           ? "Processing…"
           : `Pay advance ₹${Number(advanceAmount).toFixed(2)}`}

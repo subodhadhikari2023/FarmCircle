@@ -2,15 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   type ManagedUser,
   listUsers,
   reactivateUser,
   suspendUser,
 } from "@/lib/users";
+import { ListSkeleton } from "@/components/ui/list-skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default function AdminUsersPage() {
   const { accessToken } = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,6 +51,16 @@ export default function AdminUsersPage() {
 
   async function handleToggleSuspend(user: ManagedUser) {
     if (!accessToken) return;
+    if (!user.isSuspended) {
+      const confirmed = await confirm({
+        title: `Suspend ${user.name}?`,
+        message: "This blocks their sign-in immediately. You can reactivate the account at any time.",
+        confirmLabel: "Suspend account",
+        cancelLabel: "Cancel",
+        tone: "danger",
+      });
+      if (!confirmed) return;
+    }
     setBusyId(user.id);
     try {
       const updated = user.isSuspended
@@ -52,6 +68,11 @@ export default function AdminUsersPage() {
         : await suspendUser(accessToken, user.id);
       setUsers((prev) => prev.map((u) => (u.id === user.id ? updated : u)));
       setRowError((prev) => ({ ...prev, [user.id]: "" }));
+      toast.show({
+        variant: "success",
+        title: updated.isSuspended ? "Account suspended" : "Account reactivated",
+        message: updated.name,
+      });
     } catch (err) {
       setRowError((prev) => ({
         ...prev,
@@ -73,13 +94,13 @@ export default function AdminUsersPage() {
 
       <div className="mt-10">
         {isLoading ? (
-          <p className="text-muted">Loading accounts…</p>
+          <ListSkeleton />
         ) : loadError ? (
           <p role="alert" className="text-sm text-danger-700">
             {loadError}
           </p>
         ) : users.length === 0 ? (
-          <p className="text-muted">No Vendor or Customer accounts yet.</p>
+          <EmptyState icon="group">No Vendor or Customer accounts yet.</EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {users.map((user) => (
