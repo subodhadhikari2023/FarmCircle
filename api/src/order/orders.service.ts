@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { Prisma } from 'generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentsService } from '../payment/payments.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -54,6 +55,17 @@ export class OrdersService {
     changedBy: string,
   ) {
     return this.historyModel.create({ orderId, status, changedBy });
+  }
+
+  // The DB-level guard on the Listing/Order row (availableQuantity: { gte }
+  // or status: { in/not }) makes update() behave like a conditional
+  // "update if still valid" — a guard miss surfaces as Prisma's normal
+  // record-not-found error, not a real missing row.
+  private isRecordNotFound(err: unknown): boolean {
+    return (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2025'
+    );
   }
 
   async create(userId: string, role: Role, dto: CreateOrderDto) {
@@ -117,24 +129,41 @@ export class OrdersService {
       return this.payments.createOrderIntentPayment(intent.id, totalAmount);
     }
 
-    const [order] = await this.prisma.$transaction([
-      this.prisma.order.create({
-        data: {
-          buyerId: userId,
-          listingId: listing.id,
-          quantity: dto.quantity,
-          unitPrice,
-          totalAmount,
-          deliveryMethod: dto.deliveryMethod,
-          addressId,
-          paymentMethod: dto.paymentMethod,
-        },
-      }),
-      this.prisma.listing.update({
-        where: { id: listing.id },
-        data: { availableQuantity: availableQuantity - dto.quantity },
-      }),
-    ]);
+    // Guarded on availableQuantity so two concurrent orders can't both pass
+    // the check above and both decrement past zero (lost-update overselling).
+    // If the guard misses (stock ran out between the check and here), this
+    // update matches no row and Prisma throws P2025, caught below.
+    const order = await (async () => {
+      try {
+        const [, created] = await this.prisma.$transaction([
+          this.prisma.listing.update({
+            where: {
+              id: listing.id,
+              availableQuantity: { gte: dto.quantity },
+            },
+            data: { availableQuantity: { decrement: dto.quantity } },
+          }),
+          this.prisma.order.create({
+            data: {
+              buyerId: userId,
+              listingId: listing.id,
+              quantity: dto.quantity,
+              unitPrice,
+              totalAmount,
+              deliveryMethod: dto.deliveryMethod,
+              addressId,
+              paymentMethod: dto.paymentMethod,
+            },
+          }),
+        ]);
+        return created;
+      } catch (err) {
+        if (this.isRecordNotFound(err)) {
+          throw new ConflictException('Insufficient stock for this quantity');
+        }
+        throw err;
+      }
+    })();
 
     await this.logStatusChange(order.id, order.status, userId);
 
@@ -213,20 +242,33 @@ export class OrdersService {
       throw new ConflictException('Order can no longer be cancelled');
     }
 
-    const [updatedOrder] = await this.prisma.$transaction([
-      this.prisma.order.update({
-        where: { id },
-        data: { status: OrderStatus.CANCELLED },
-      }),
-      this.prisma.listing.update({
-        where: { id: order.listingId },
-        data: {
-          availableQuantity:
-            order.listing.availableQuantity.toNumber() +
-            order.quantity.toNumber(),
-        },
-      }),
-    ]);
+    // Guarded on status so two concurrent cancel calls for the same order
+    // can't both pass the check above and both restore stock (double
+    // credit). Restoring via { increment } rather than a computed absolute
+    // value also avoids losing another order's concurrent stock change on
+    // the same listing.
+    const updatedOrder = await (async () => {
+      try {
+        const [cancelledOrder] = await this.prisma.$transaction([
+          this.prisma.order.update({
+            where: { id, status: { in: CANCELLABLE_STATUSES } },
+            data: { status: OrderStatus.CANCELLED },
+          }),
+          this.prisma.listing.update({
+            where: { id: order.listingId },
+            data: {
+              availableQuantity: { increment: order.quantity.toNumber() },
+            },
+          }),
+        ]);
+        return cancelledOrder;
+      } catch (err) {
+        if (this.isRecordNotFound(err)) {
+          throw new ConflictException('Order can no longer be cancelled');
+        }
+        throw err;
+      }
+    })();
 
     await this.logStatusChange(id, OrderStatus.CANCELLED, userId);
 
