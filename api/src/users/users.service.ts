@@ -86,11 +86,16 @@ export class UsersService {
     if (user.isSuspended) {
       throw new ConflictException('User is already suspended');
     }
-    return this.prismaService.user.update({
+    const updated = await this.prismaService.user.update({
       where: { id },
       data: { isSuspended: true },
       select: SAFE_USER_SELECT,
     });
+    await this.prismaService.refreshToken.updateMany({
+      where: { userId: id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return updated;
   }
 
   async reactivate(id: string) {
