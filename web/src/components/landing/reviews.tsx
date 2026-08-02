@@ -38,12 +38,17 @@ export async function Reviews() {
               key={review.id}
               className="rounded-md border border-border bg-surface p-5"
             >
-              <div aria-hidden="true">
-                <span className="text-ink">
-                  {"★".repeat(review.rating)}
+              <div>
+                <span aria-hidden="true">
+                  <span className="text-ink">
+                    {"★".repeat(review.rating)}
+                  </span>
+                  <span className="text-granite-300">
+                    {"★".repeat(5 - review.rating)}
+                  </span>
                 </span>
-                <span className="text-granite-300">
-                  {"★".repeat(5 - review.rating)}
+                <span className="sr-only">
+                  Rated {review.rating} out of 5 stars
                 </span>
               </div>
               <p className="mt-3 text-sm text-foreground">

@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { ListSkeleton } from "@/components/ui/list-skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { type Crop, listCrops } from "@/lib/crops";
 import { type Variety, listVarieties } from "@/lib/varieties";
 import {
@@ -41,6 +45,8 @@ function fromAdmin(listing: ListingAdmin): ManagedListing {
 
 export default function GrowerListingsPage() {
   const { accessToken } = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const [listings, setListings] = useState<ListingAdmin[]>([]);
   const [isLoadingListings, setIsLoadingListings] = useState(true);
@@ -152,6 +158,7 @@ export default function GrowerListingsPage() {
       setAvailableQuantity("");
       setDescription("");
       setIsOrganicCertified(false);
+      toast.show({ variant: "success", title: "Listing published" });
     } catch (err) {
       setCreateError(
         err instanceof Error ? err.message : "Couldn't create listing.",
@@ -180,6 +187,7 @@ export default function GrowerListingsPage() {
         prev.map((l) => (l.id === listing.id ? { ...l, ...listing } : l)),
       );
       loadIntoEditor(fromAdmin(listing));
+      toast.show({ variant: "success", title: "Listing changes saved" });
     } catch (err) {
       setEditError(
         err instanceof Error ? err.message : "Couldn't update listing.",
@@ -191,9 +199,14 @@ export default function GrowerListingsPage() {
 
   async function handleClose() {
     if (!accessToken || !managed) return;
-    if (!window.confirm("Close this listing? Buyers won't be able to order it anymore.")) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: "Close this listing?",
+      message: "Buyers won't be able to order it anymore. This can't be undone.",
+      confirmLabel: "Close listing",
+      cancelLabel: "Keep it open",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setEditError(null);
     setIsClosing(true);
     try {
@@ -202,6 +215,7 @@ export default function GrowerListingsPage() {
         prev.map((l) => (l.id === listing.id ? { ...l, ...listing } : l)),
       );
       loadIntoEditor(fromAdmin(listing));
+      toast.show({ variant: "success", title: "Listing closed" });
     } catch (err) {
       setEditError(
         err instanceof Error ? err.message : "Couldn't close listing.",
@@ -267,7 +281,7 @@ export default function GrowerListingsPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor="retail-price" className="mb-1 block text-sm font-medium text-foreground">
               Retail price (₹/kg)
@@ -300,7 +314,7 @@ export default function GrowerListingsPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <label htmlFor="min-wholesale-qty" className="mb-1 block text-sm font-medium text-foreground">
               Min wholesale qty (kg)
@@ -389,8 +403,11 @@ export default function GrowerListingsPage() {
         <button
           type="submit"
           disabled={isCreating || !cropId || !varietyId}
-          className="self-start rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+          className="flex items-center gap-1.5 self-start rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
         >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+            sell
+          </span>
           {isCreating ? "Publishing…" : "Publish listing"}
         </button>
       </form>
@@ -412,16 +429,16 @@ export default function GrowerListingsPage() {
 
       <div className="mt-4">
         {isLoadingListings ? (
-          <p className="text-muted">Loading listings…</p>
+          <ListSkeleton />
         ) : listingsError ? (
           <p role="alert" className="text-sm text-danger-700">
             {listingsError}
           </p>
         ) : listings.length === 0 ? (
-          <p className="text-muted">
+          <EmptyState icon="sell">
             No listings yet — create a direct listing above, or set terms on
             a batch that&apos;s reached its final milestone.
-          </p>
+          </EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {listings.map((listing) => (

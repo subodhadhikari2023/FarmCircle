@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
 import {
   type Review,
   hideReview,
@@ -9,6 +10,18 @@ import {
   listReviews,
   unhideReview,
 } from "@/lib/reviews";
+
+function StarRating({ rating }: { rating: number }) {
+  return (
+    <div>
+      <span aria-hidden="true">
+        <span className="text-ink">{"★".repeat(rating)}</span>
+        <span className="text-granite-300">{"★".repeat(5 - rating)}</span>
+      </span>
+      <span className="sr-only">Rated {rating} out of 5 stars</span>
+    </div>
+  );
+}
 
 function ReviewRow({
   review,
@@ -30,12 +43,7 @@ function ReviewRow({
   return (
     <li className="flex flex-wrap items-start gap-3 px-4 py-3">
       <div className="flex-1">
-        <div aria-hidden="true">
-          <span className="text-ink">{"★".repeat(review.rating)}</span>
-          <span className="text-granite-300">
-            {"★".repeat(5 - review.rating)}
-          </span>
-        </div>
+        <StarRating rating={review.rating} />
         {review.comment && (
           <p className="mt-1 text-sm text-foreground">{review.comment}</p>
         )}
@@ -62,6 +70,7 @@ function ReviewRow({
 
 export default function AdminReviewsPage() {
   const { accessToken } = useAuth();
+  const toast = useToast();
 
   const [reviews, setReviews] = useState<Review[]>([]);
   const [hiddenReviews, setHiddenReviews] = useState<Review[]>([]);
@@ -105,6 +114,7 @@ export default function AdminReviewsPage() {
       setReviews((prev) => prev.filter((r) => r.id !== review.id));
       setHiddenReviews((prev) => [{ ...review, isHidden: true }, ...prev]);
       setRowError((prev) => ({ ...prev, [review.id]: "" }));
+      toast.show({ variant: "success", title: "Review hidden" });
     } catch (err) {
       setRowError((prev) => ({
         ...prev,
@@ -124,6 +134,7 @@ export default function AdminReviewsPage() {
       setHiddenReviews((prev) => prev.filter((r) => r.id !== review.id));
       setReviews((prev) => [{ ...review, isHidden: false }, ...prev]);
       setRowError((prev) => ({ ...prev, [review.id]: "" }));
+      toast.show({ variant: "success", title: "Review unhidden" });
     } catch (err) {
       setRowError((prev) => ({
         ...prev,
