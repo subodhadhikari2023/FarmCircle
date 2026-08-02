@@ -16,7 +16,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: ./api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migrations against production database
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+
   build-and-push:
+    needs: migrate
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -40,3 +68,8 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/farmcircle-api:latest
             ghcr.io/${{ github.repository_owner }}/farmcircle-api:${{ github.sha }}
+
+      - name: Trigger Render deploy
+        run: curl -fsS "$RENDER_DEPLOY_HOOK_URL"
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
