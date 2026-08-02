@@ -99,6 +99,16 @@ export class AuthService {
     }
 
     if (stored.revokedAt) {
+      // A token that's already been rotated away being presented again
+      // means either the legitimate client double-submitted, or an
+      // attacker stole it before rotation. We can't tell those apart, so
+      // treat it as theft: kill every active session for this user, not
+      // just the reused token, so a stolen-then-rotated refresh token
+      // can't keep a parallel attacker session alive.
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: stored.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
       throw new UnauthorizedException('Refresh token reuse detected');
     }
 

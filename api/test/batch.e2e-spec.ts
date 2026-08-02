@@ -634,7 +634,21 @@ describe('BatchModule (e2e)', () => {
   });
 
   describe('GET /batches/:id/timeline', () => {
-    it('is publicly readable without a token', async () => {
+    it('returns 404 while the batch has no published, tracked-path listing yet', async () => {
+      const setup = await createFullSetup('timeline-noListing');
+      const batch = await createBatchViaApi(
+        setup.token,
+        setup.crop,
+        setup.variety,
+        setup.cycle,
+      );
+
+      await request(app.getHttpServer())
+        .get(`/batches/${batch.id}/timeline`)
+        .expect(404);
+    });
+
+    it('is publicly readable without a token once the tracked listing is published, exposing only milestone names/dates', async () => {
       const setup = await createFullSetup('timeline-public');
       const batch = await createBatchViaApi(
         setup.token,
@@ -643,16 +657,55 @@ describe('BatchModule (e2e)', () => {
         setup.cycle,
       );
 
+      await request(app.getHttpServer())
+        .patch(`/batches/${batch.id}/milestone`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({ reachedAt: '2026-02-01' })
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/batches/${batch.id}/milestone`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({ reachedAt: '2026-02-10' })
+        .expect(200);
+
+      const draftRes = await request(app.getHttpServer())
+        .post(`/inventory/from-batch/${batch.id}`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({
+          retailPrice: 50,
+          wholesalePrice: 35,
+          minWholesaleQty: 15,
+          retailCeilingPercent: 10,
+          preBookablePercent: 60,
+        })
+        .expect(201);
+      const listingId = (draftRes.body as { id: string }).id;
+      createdListingIds.push(listingId);
+
+      // Still a draft (unpublished) at this point — timeline stays hidden.
+      await request(app.getHttpServer())
+        .get(`/batches/${batch.id}/timeline`)
+        .expect(404);
+
+      await request(app.getHttpServer())
+        .patch(`/batches/${batch.id}/confirm-harvest`)
+        .set('Authorization', `Bearer ${setup.token}`)
+        .send({ actualYield: 75 })
+        .expect(200);
+
       const res = await request(app.getHttpServer())
         .get(`/batches/${batch.id}/timeline`)
         .expect(200);
       const body = res.body as {
-        milestoneProgress: Array<{ milestone: { name: string } }>;
+        batchId: string;
+        milestones: Array<{ name: string; reachedAt: string | null }>;
       };
-      expect(body.milestoneProgress.map((p) => p.milestone.name)).toEqual([
-        'Sown',
-        'Harvested',
-      ]);
+      expect(body.batchId).toBe(batch.id);
+      expect(body.milestones.map((m) => m.name)).toEqual(['Sown', 'Harvested']);
+      expect(body.milestones.every((m) => m.reachedAt !== null)).toBe(true);
+      expect(body).not.toHaveProperty('predictedYield');
+      expect(body).not.toHaveProperty('quantity');
+      expect(body).not.toHaveProperty('ownerId');
     });
 
     it('returns 404 for an unknown batch id', async () => {
