@@ -15,6 +15,13 @@ import {
   PaymentMethod,
   Role,
 } from 'generated/prisma/enums';
+import { Prisma } from 'generated/prisma/client';
+
+const recordNotFoundError = () =>
+  new Prisma.PrismaClientKnownRequestError('Record not found', {
+    code: 'P2025',
+    clientVersion: 'test',
+  });
 
 const decimal = (n: number) => ({ toNumber: () => n });
 
@@ -104,9 +111,11 @@ describe('OrdersService', () => {
     function stubTransaction(orderResult: unknown, listingResult?: unknown) {
       mockPrismaService.order.create.mockReturnValue('order-create-op');
       mockPrismaService.listing.update.mockReturnValue('listing-update-op');
+      // Real code destructures [, order] — the guarded listing update runs
+      // first, the order create second.
       mockPrismaService.$transaction.mockResolvedValue([
-        orderResult,
         listingResult,
+        orderResult,
       ]);
     }
 
@@ -171,8 +180,8 @@ describe('OrdersService', () => {
         },
       });
       expect(mockPrismaService.listing.update).toHaveBeenCalledWith({
-        where: { id: 'l1' },
-        data: { availableQuantity: 85 },
+        where: { id: 'l1', availableQuantity: { gte: 15 } },
+        data: { availableQuantity: { decrement: 15 } },
       });
       expect(mockHistoryModel.create).toHaveBeenCalledWith({
         orderId: 'o1',
@@ -180,6 +189,19 @@ describe('OrdersService', () => {
         changedBy: 'vendor1',
       });
       expect(result).toEqual(created);
+    });
+
+    it('throws ConflictException, without creating an order, when the guarded stock decrement loses a concurrency race', async () => {
+      mockPrismaService.listing.findFirst.mockResolvedValue(baseListing);
+      mockPrismaService.$transaction.mockRejectedValue(recordNotFoundError());
+
+      await expect(
+        service.create('customer1', Role.CUSTOMER, {
+          ...pickupDto,
+          quantity: 5,
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockHistoryModel.create).not.toHaveBeenCalled();
     });
 
     it('falls back a Vendor order to retail pricing below minWholesaleQty', async () => {
@@ -596,12 +618,15 @@ describe('OrdersService', () => {
       const result = await service.cancel('u1', 'o1');
 
       expect(mockPrismaService.order.update).toHaveBeenCalledWith({
-        where: { id: 'o1' },
+        where: {
+          id: 'o1',
+          status: { in: [OrderStatus.PLACED, OrderStatus.CONFIRMED] },
+        },
         data: { status: OrderStatus.CANCELLED },
       });
       expect(mockPrismaService.listing.update).toHaveBeenCalledWith({
         where: { id: 'l1' },
-        data: { availableQuantity: 100 },
+        data: { availableQuantity: { increment: 10 } },
       });
       expect(mockHistoryModel.create).toHaveBeenCalledWith({
         orderId: 'o1',
@@ -609,6 +634,23 @@ describe('OrdersService', () => {
         changedBy: 'u1',
       });
       expect(result).toEqual(updatedOrder);
+    });
+
+    it('throws ConflictException, without logging a status change, when the order was already cancelled/advanced by a concurrent request', async () => {
+      mockPrismaService.order.findFirst.mockResolvedValue({
+        id: 'o1',
+        buyerId: 'u1',
+        status: OrderStatus.PLACED,
+        listingId: 'l1',
+        quantity: decimal(10),
+        listing: { id: 'l1', availableQuantity: decimal(90) },
+      });
+      mockPrismaService.$transaction.mockRejectedValue(recordNotFoundError());
+
+      await expect(service.cancel('u1', 'o1')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockHistoryModel.create).not.toHaveBeenCalled();
     });
   });
 
