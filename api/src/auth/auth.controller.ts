@@ -89,7 +89,11 @@ export class AuthController {
   ): Promise<void> {
     const cookies = req.cookies as Record<string, string | undefined>;
     await this.authService.logout(cookies.refreshToken);
-    res.clearCookie('refreshToken');
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+    });
   }
 
   @Get('google')
@@ -120,7 +124,7 @@ export class AuthController {
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
       maxAge: Number(this.configService.get('JWT_REFRESH_TTL_SECONDS')) * 1000,
     });
   }
