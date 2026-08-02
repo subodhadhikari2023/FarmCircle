@@ -325,11 +325,14 @@ describe('AuthService', () => {
       });
     });
 
-    it('throws UnauthorizedException when the stored RefreshToken row was already revoked (reuse detected)', async () => {
+    it('throws UnauthorizedException and revokes every active session for the user when the stored RefreshToken row was already revoked (reuse detected)', async () => {
       mockJwtService.verify.mockReturnValue(decodedPayload);
       mockPrismaService.refreshToken.findUnique.mockResolvedValue({
         ...storedRefreshToken,
         revokedAt: new Date(Date.now() - 1000),
+      });
+      mockPrismaService.refreshToken.updateMany.mockResolvedValue({
+        count: 3,
       });
 
       await expect(service.refresh(refreshToken)).rejects.toThrow(
@@ -337,6 +340,13 @@ describe('AuthService', () => {
       );
       expect(argon2.verify).not.toHaveBeenCalled();
       expect(mockPrismaService.refreshToken.update).not.toHaveBeenCalled();
+      expect(mockPrismaService.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: existingUser.id, revokedAt: null },
+        data: {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.any() is typed `any` in @types/jest; no cast survives the no-unnecessary-type-assertion autofix
+          revokedAt: expect.any(Date),
+        },
+      });
     });
 
     it('throws UnauthorizedException when the stored RefreshToken row is expired', async () => {

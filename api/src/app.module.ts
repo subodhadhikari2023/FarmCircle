@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -21,6 +23,11 @@ import { ReviewModule } from './review/review.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    // General, loose baseline against basic API abuse; auth.controller.ts
+    // overrides this with a much stricter limit on /auth/login and
+    // /auth/register specifically (brute-force/credential-stuffing were
+    // previously unthrottled there).
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 100 }]),
     MongooseModule.forRoot(process.env.MONGO_URL as string),
     PrismaModule,
     RedisModule,
@@ -36,6 +43,6 @@ import { ReviewModule } from './review/review.module';
     ReviewModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

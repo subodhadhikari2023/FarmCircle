@@ -3,6 +3,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ReviewsService } from './reviews.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderStatus } from 'generated/prisma/enums';
+import { Prisma } from 'generated/prisma/client';
 
 describe('ReviewsService', () => {
   let service: ReviewsService;
@@ -131,6 +132,40 @@ describe('ReviewsService', () => {
         ConflictException,
       );
       expect(mockPrismaService.review.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException (not a raw 500) when a concurrent submission wins the race and hits the unique constraint', async () => {
+      mockPrismaService.order.findFirst.mockResolvedValue({
+        id: 'o1',
+        buyerId: 'u1',
+        status: OrderStatus.DELIVERED,
+        listing: { ownerId: 'grower1' },
+      });
+      mockPrismaService.review.findUnique.mockResolvedValue(null);
+      mockPrismaService.review.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(service.create('u1', dto)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('rethrows unrelated errors from review creation', async () => {
+      mockPrismaService.order.findFirst.mockResolvedValue({
+        id: 'o1',
+        buyerId: 'u1',
+        status: OrderStatus.DELIVERED,
+        listing: { ownerId: 'grower1' },
+      });
+      mockPrismaService.review.findUnique.mockResolvedValue(null);
+      const unrelatedError = new Error('connection lost');
+      mockPrismaService.review.create.mockRejectedValue(unrelatedError);
+
+      await expect(service.create('u1', dto)).rejects.toThrow(unrelatedError);
     });
   });
 

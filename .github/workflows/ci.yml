@@ -79,6 +79,9 @@ jobs:
       RAZORPAY_KEY_ID: ${{ secrets.CI_RAZORPAY_KEY_ID }}
       RAZORPAY_KEY_SECRET: ${{ secrets.CI_RAZORPAY_KEY_SECRET }}
       RAZORPAY_WEBHOOK_SECRET: ${{ secrets.CI_RAZORPAY_WEBHOOK_SECRET }}
+      # Loose on purpose — e2e calls /auth/login many times per run. The
+      # code defaults to a strict 5-per-60s limit when this is unset.
+      AUTH_THROTTLE_LIMIT: 1000
 
     steps:
       - name: Checkout
