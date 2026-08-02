@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -47,6 +48,8 @@ function safeEqual(a: string, b: string): boolean {
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
@@ -312,6 +315,9 @@ export class PaymentsService {
     paymentId: string,
     razorpayPaymentId: string,
   ) {
+    this.logger.warn(
+      `Payment ${paymentId} (razorpay payment ${razorpayPaymentId}) captured with no Order created — flagged for manual reconciliation`,
+    );
     await this.prisma.payment.updateMany({
       where: { id: paymentId, status: { not: PaymentStatus.SUCCESS } },
       data: { razorpayPaymentId, status: PaymentStatus.SUCCESS },
@@ -342,6 +348,9 @@ export class PaymentsService {
       where: { id: intent.listingId },
     });
     if (listing.availableQuantity.toNumber() < intent.quantity.toNumber()) {
+      this.logger.warn(
+        `OrderIntent ${intent.id} payment captured but stock ran out before confirmation — flagged for manual reconciliation`,
+      );
       await this.prisma.payment.update({
         where: { id: payment.id },
         data: { razorpayPaymentId, status: PaymentStatus.SUCCESS },

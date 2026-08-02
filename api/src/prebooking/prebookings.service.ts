@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -14,6 +15,8 @@ import { PreBookingStatus, Role } from 'generated/prisma/enums';
 
 @Injectable()
 export class PreBookingsService {
+  private readonly logger = new Logger(PreBookingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
@@ -146,6 +149,9 @@ export class PreBookingsService {
         data: { status: PreBookingStatus.EXPIRED },
       });
       if (count === 0) {
+        this.logger.debug(
+          `Skipped expiring pre-booking ${preBooking.id} — confirmed by a concurrent webhook first`,
+        );
         continue;
       }
       await this.redis.releaseQueueCapacity(
@@ -153,6 +159,9 @@ export class PreBookingsService {
         preBooking.quantity.toNumber(),
       );
       await this.redis.clearPaymentHold(preBooking.id);
+      this.logger.log(
+        `Expired pre-booking ${preBooking.id} after its 48h payment hold elapsed`,
+      );
     }
   }
 
