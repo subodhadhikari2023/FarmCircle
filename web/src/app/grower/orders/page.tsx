@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { OrderStatusBadge } from "@/components/ui/status-badge";
+import { ListSkeleton } from "@/components/ui/list-skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   type Order,
   advanceOrderStatus,
@@ -9,18 +13,9 @@ import {
   listMyOrders,
 } from "@/lib/orders-admin";
 
-const STATUS_LABEL: Record<Order["status"], string> = {
-  PLACED: "Placed",
-  CONFIRMED: "Confirmed",
-  OUT_FOR_DELIVERY: "Out for delivery",
-  READY_FOR_PICKUP: "Ready for pickup",
-  DELIVERED: "Delivered",
-  PICKED_UP: "Picked up",
-  CANCELLED: "Cancelled",
-};
-
 export default function GrowerOrdersPage() {
   const { accessToken } = useAuth();
+  const toast = useToast();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -62,6 +57,11 @@ export default function GrowerOrdersPage() {
         prev.map((order) => (order.id === orderId ? updated : order)),
       );
       setRowError((prev) => ({ ...prev, [orderId]: "" }));
+      toast.show({
+        variant: "success",
+        title: "Order status updated",
+        message: `Now ${updated.status.replace(/_/g, " ").toLowerCase()}.`,
+      });
     } catch (err) {
       setRowError((prev) => ({
         ...prev,
@@ -84,16 +84,16 @@ export default function GrowerOrdersPage() {
 
       <div className="mt-10">
         {isLoading ? (
-          <p className="text-muted">Loading orders…</p>
+          <ListSkeleton />
         ) : loadError ? (
           <p role="alert" className="text-sm text-danger-700">
             {loadError}
           </p>
         ) : orders.length === 0 ? (
-          <p className="text-muted">
+          <EmptyState icon="receipt_long">
             No orders yet — they&apos;ll show up here once a buyer orders
             from one of your listings.
-          </p>
+          </EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {orders.map((order) => (
@@ -107,9 +107,7 @@ export default function GrowerOrdersPage() {
                       : "Pickup"}
                   </p>
                 </div>
-                <span className="rounded-full bg-icy-aqua-50 px-2 py-0.5 text-xs font-medium text-primary-text">
-                  {STATUS_LABEL[order.status]}
-                </span>
+                <OrderStatusBadge status={order.status} />
                 <button
                   type="button"
                   disabled={busyId === order.id || !hasNextStatus(order.status)}

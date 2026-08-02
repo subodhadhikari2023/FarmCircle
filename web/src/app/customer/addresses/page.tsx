@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   type Address,
   createAddress,
@@ -13,6 +15,7 @@ const INPUT_CLASS =
 
 export default function CustomerAddressesPage() {
   const { accessToken } = useAuth();
+  const toast = useToast();
 
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -24,6 +27,31 @@ export default function CustomerAddressesPage() {
   const [longitude, setLongitude] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+  const [locateError, setLocateError] = useState<string | null>(null);
+
+  function handleUseLocation() {
+    if (!("geolocation" in navigator)) {
+      setLocateError("Location isn't available in this browser.");
+      return;
+    }
+    setLocateError(null);
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLatitude(position.coords.latitude.toFixed(6));
+        setLongitude(position.coords.longitude.toFixed(6));
+        setIsLocating(false);
+      },
+      () => {
+        setLocateError(
+          "Couldn't get your location — allow location access, or enter coordinates manually below.",
+        );
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
 
   useEffect(() => {
     if (!accessToken) return;
@@ -72,6 +100,11 @@ export default function CustomerAddressesPage() {
       setLandmark("");
       setLatitude("");
       setLongitude("");
+      toast.show({
+        variant: "success",
+        title: "Address added",
+        message: "It's ready to pick next time you check out with delivery.",
+      });
     } catch (err) {
       setCreateError(
         err instanceof Error ? err.message : "Couldn't add address.",
@@ -116,45 +149,78 @@ export default function CustomerAddressesPage() {
             className={INPUT_CLASS}
           />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="address-latitude" className="mb-1 block text-sm font-medium text-foreground">
-              Latitude
-            </label>
-            <input
-              id="address-latitude"
-              type="number"
-              step="any"
-              min="-90"
-              max="90"
-              required
-              value={latitude}
-              onChange={(event) => setLatitude(event.target.value)}
-              placeholder="e.g. 12.9716"
-              className={INPUT_CLASS}
-            />
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-foreground">Coordinates</span>
+            <button
+              type="button"
+              onClick={handleUseLocation}
+              disabled={isLocating}
+              className="flex items-center gap-1.5 rounded-sm border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-background disabled:opacity-60"
+            >
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                my_location
+              </span>
+              {isLocating ? "Locating…" : "Use my current location"}
+            </button>
           </div>
-          <div>
-            <label htmlFor="address-longitude" className="mb-1 block text-sm font-medium text-foreground">
-              Longitude
-            </label>
-            <input
-              id="address-longitude"
-              type="number"
-              step="any"
-              min="-180"
-              max="180"
-              required
-              value={longitude}
-              onChange={(event) => setLongitude(event.target.value)}
-              placeholder="e.g. 77.5946"
-              className={INPUT_CLASS}
-            />
+          {locateError && (
+            <p role="alert" className="mt-1.5 text-xs text-danger-700">
+              {locateError}
+            </p>
+          )}
+          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="address-latitude" className="mb-1 block text-sm font-medium text-foreground">
+                Latitude
+              </label>
+              <input
+                id="address-latitude"
+                type="number"
+                step="any"
+                min="-90"
+                max="90"
+                required
+                value={latitude}
+                onChange={(event) => setLatitude(event.target.value)}
+                placeholder="e.g. 12.9716"
+                className={INPUT_CLASS}
+              />
+            </div>
+            <div>
+              <label htmlFor="address-longitude" className="mb-1 block text-sm font-medium text-foreground">
+                Longitude
+              </label>
+              <input
+                id="address-longitude"
+                type="number"
+                step="any"
+                min="-180"
+                max="180"
+                required
+                value={longitude}
+                onChange={(event) => setLongitude(event.target.value)}
+                placeholder="e.g. 77.5946"
+                className={INPUT_CLASS}
+              />
+            </div>
           </div>
+          <p className="mt-1.5 flex items-center gap-1 text-xs text-muted">
+            <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+              info
+            </span>
+            Or find them on{" "}
+            <a
+              href="https://www.google.com/maps"
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-primary-text hover:underline"
+            >
+              Google Maps
+            </a>{" "}
+            — long-press (or right-click) a spot to see its coordinates.
+          </p>
         </div>
-        <p className="text-xs text-muted">
-          Find your coordinates by right-clicking a location on Google Maps.
-        </p>
         {createError && (
           <p role="alert" className="text-sm text-danger-700">
             {createError}
@@ -177,9 +243,9 @@ export default function CustomerAddressesPage() {
             {loadError}
           </p>
         ) : addresses.length === 0 ? (
-          <p className="text-muted">
+          <EmptyState icon="location_on">
             No addresses yet — add your first one above.
-          </p>
+          </EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {addresses.map((address) => (

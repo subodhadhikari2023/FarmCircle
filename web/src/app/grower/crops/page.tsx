@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   type Crop,
   createCrop,
@@ -16,6 +19,8 @@ const INPUT_CLASS =
 
 export default function GrowerCropsPage() {
   const { accessToken } = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const [crops, setCrops] = useState<Crop[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -63,6 +68,7 @@ export default function GrowerCropsPage() {
       const crop = await createCrop(accessToken, newName.trim());
       setCrops((prev) => [...prev, crop]);
       setNewName("");
+      toast.show({ variant: "success", title: "Crop added", message: crop.name });
     } catch (err) {
       setCreateError(
         err instanceof Error ? err.message : "Couldn't create crop.",
@@ -86,6 +92,7 @@ export default function GrowerCropsPage() {
       setCrops((prev) => prev.map((crop) => (crop.id === id ? updated : crop)));
       setRowError((prev) => ({ ...prev, [id]: "" }));
       setEditingId(null);
+      toast.show({ variant: "success", title: "Crop renamed", message: updated.name });
     } catch (err) {
       setRowError((prev) => ({
         ...prev,
@@ -98,13 +105,18 @@ export default function GrowerCropsPage() {
 
   async function handleDelete(crop: Crop) {
     if (!accessToken) return;
-    if (!window.confirm(`Delete "${crop.name}"? This can't be undone.`)) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: `Delete "${crop.name}"?`,
+      message: "This can't be undone.",
+      confirmLabel: "Delete crop",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setBusyId(crop.id);
     try {
       await deleteCrop(accessToken, crop.id);
       setCrops((prev) => prev.filter((c) => c.id !== crop.id));
+      toast.show({ variant: "success", title: "Crop deleted", message: crop.name });
     } catch (err) {
       setRowError((prev) => ({
         ...prev,
@@ -141,8 +153,11 @@ export default function GrowerCropsPage() {
         <button
           type="submit"
           disabled={isCreating || newName.trim().length === 0}
-          className="shrink-0 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+          className="flex shrink-0 items-center gap-1.5 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
         >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+            add
+          </span>
           {isCreating ? "Adding…" : "Add crop"}
         </button>
       </form>
@@ -160,7 +175,7 @@ export default function GrowerCropsPage() {
             {loadError}
           </p>
         ) : crops.length === 0 ? (
-          <p className="text-muted">No crops yet — add your first one above.</p>
+          <EmptyState icon="grass">No crops yet — add your first one above.</EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {crops.map((crop) => (
@@ -195,14 +210,14 @@ export default function GrowerCropsPage() {
                     <span className="flex-1 text-foreground">{crop.name}</span>
                     <Link
                       href={`/grower/crops/${crop.id}`}
-                      className="text-sm font-medium text-primary-text hover:underline"
+                      className="rounded-sm px-2 py-1.5 text-sm font-medium text-primary-text transition-colors hover:bg-icy-aqua-50"
                     >
                       Varieties
                     </Link>
                     <button
                       type="button"
                       onClick={() => startEditing(crop)}
-                      className="text-sm text-muted hover:text-foreground hover:underline"
+                      className="rounded-sm px-2 py-1.5 text-sm text-muted transition-colors hover:bg-background hover:text-foreground"
                     >
                       Rename
                     </button>
@@ -210,7 +225,7 @@ export default function GrowerCropsPage() {
                       type="button"
                       disabled={busyId === crop.id}
                       onClick={() => void handleDelete(crop)}
-                      className="text-sm text-danger-700 hover:underline disabled:opacity-60"
+                      className="rounded-sm px-2 py-1.5 text-sm text-danger-700 transition-colors hover:bg-danger-50 disabled:opacity-60"
                     >
                       Delete
                     </button>

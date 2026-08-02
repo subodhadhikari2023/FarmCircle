@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { EmptyState } from "@/components/ui/empty-state";
 import { type Crop, listCrops } from "@/lib/crops";
 import { type Variety, listVarieties } from "@/lib/varieties";
 import { type Cycle, listCycles } from "@/lib/cycles";
@@ -13,6 +15,7 @@ const INPUT_CLASS =
 
 export default function GrowerBatchesPage() {
   const { accessToken } = useAuth();
+  const toast = useToast();
 
   const [batches, setBatches] = useState<Batch[]>([]);
   const [crops, setCrops] = useState<Crop[]>([]);
@@ -100,6 +103,7 @@ export default function GrowerBatchesPage() {
       setBatches((prev) => [...prev, batch]);
       setQuantity("");
       setPredictedYield("");
+      toast.show({ variant: "success", title: "Batch started" });
     } catch (err) {
       setCreateError(
         err instanceof Error ? err.message : "Couldn't start batch.",
@@ -203,8 +207,11 @@ export default function GrowerBatchesPage() {
         <button
           type="submit"
           disabled={isCreating || !cropId || !varietyId || !cycleId}
-          className="self-start rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+          className="flex items-center gap-1.5 self-start rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
         >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+            add
+          </span>
           {isCreating ? "Starting…" : "Start batch"}
         </button>
       </form>
@@ -222,7 +229,7 @@ export default function GrowerBatchesPage() {
             {loadError}
           </p>
         ) : batches.length === 0 ? (
-          <p className="text-muted">No batches yet — start one above.</p>
+          <EmptyState icon="inventory_2">No batches yet — start one above.</EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {batches.map((batch) => (

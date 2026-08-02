@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { type CycleWithMilestones, getCycle } from "@/lib/cycles";
 import {
   type Milestone,
@@ -20,6 +23,8 @@ type EditDraft = { name: string; order: string; expectedDurationDays: string };
 export default function GrowerCycleMilestonesPage() {
   const { id: cycleId } = useParams<{ id: string }>();
   const { accessToken } = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const [cycle, setCycle] = useState<CycleWithMilestones | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -83,6 +88,7 @@ export default function GrowerCycleMilestonesPage() {
       setNewName("");
       setNewOrder("");
       setNewDuration("");
+      toast.show({ variant: "success", title: "Milestone added", message: milestone.name });
     } catch (err) {
       setCreateError(
         err instanceof Error ? err.message : "Couldn't create milestone.",
@@ -123,6 +129,7 @@ export default function GrowerCycleMilestonesPage() {
       );
       setRowError((prev) => ({ ...prev, [id]: "" }));
       setEditingId(null);
+      toast.show({ variant: "success", title: "Milestone saved", message: updated.name });
     } catch (err) {
       setRowError((prev) => ({
         ...prev,
@@ -135,11 +142,13 @@ export default function GrowerCycleMilestonesPage() {
 
   async function handleDelete(milestone: Milestone) {
     if (!accessToken) return;
-    if (
-      !window.confirm(`Delete "${milestone.name}"? This can't be undone.`)
-    ) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: `Delete "${milestone.name}"?`,
+      message: "This can't be undone.",
+      confirmLabel: "Delete milestone",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setBusyId(milestone.id);
     try {
       await deleteMilestone(accessToken, milestone.id);
@@ -151,6 +160,7 @@ export default function GrowerCycleMilestonesPage() {
             }
           : prev,
       );
+      toast.show({ variant: "success", title: "Milestone deleted", message: milestone.name });
     } catch (err) {
       setRowError((prev) => ({
         ...prev,
@@ -205,8 +215,11 @@ export default function GrowerCycleMilestonesPage() {
         <button
           type="submit"
           disabled={isCreating || newName.trim().length === 0}
-          className="shrink-0 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+          className="flex shrink-0 items-center gap-1.5 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
         >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+            add
+          </span>
           {isCreating ? "Adding…" : "Add milestone"}
         </button>
       </form>
@@ -224,9 +237,9 @@ export default function GrowerCycleMilestonesPage() {
             {loadError}
           </p>
         ) : !cycle || cycle.milestones.length === 0 ? (
-          <p className="text-muted">
+          <EmptyState icon="cyclone">
             No milestones yet — add your first one above.
-          </p>
+          </EmptyState>
         ) : (
           <ul className="divide-y divide-border rounded-md border border-border bg-surface">
             {cycle.milestones.map((milestone) => (
@@ -291,7 +304,7 @@ export default function GrowerCycleMilestonesPage() {
                     <button
                       type="button"
                       onClick={() => startEditing(milestone)}
-                      className="text-sm text-muted hover:text-foreground hover:underline"
+                      className="rounded-sm px-2 py-1.5 text-sm text-muted transition-colors hover:bg-background hover:text-foreground"
                     >
                       Edit
                     </button>
@@ -299,7 +312,7 @@ export default function GrowerCycleMilestonesPage() {
                       type="button"
                       disabled={busyId === milestone.id}
                       onClick={() => void handleDelete(milestone)}
-                      className="text-sm text-danger-700 hover:underline disabled:opacity-60"
+                      className="rounded-sm px-2 py-1.5 text-sm text-danger-700 transition-colors hover:bg-danger-50 disabled:opacity-60"
                     >
                       Delete
                     </button>
