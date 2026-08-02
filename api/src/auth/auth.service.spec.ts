@@ -155,6 +155,7 @@ describe('AuthService', () => {
       name: 'Test Vendor',
       role: 'VENDOR',
       passwordHash: 'hashed-password',
+      isSuspended: false,
     };
 
     it('throws UnauthorizedException when no user exists for the email', async () => {
@@ -264,6 +265,19 @@ describe('AuthService', () => {
         UnauthorizedException,
       );
     });
+
+    it('throws UnauthorizedException when the account is suspended, even with a valid password', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        ...existingUser,
+        isSuspended: true,
+      });
+      (argon2.verify as jest.Mock).mockResolvedValue(true);
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockJwtService.sign).not.toHaveBeenCalled();
+    });
   });
 
   describe('refresh', () => {
@@ -278,6 +292,7 @@ describe('AuthService', () => {
       name: 'Test Vendor',
       role: 'VENDOR',
       passwordHash: 'hashed-password',
+      isSuspended: false,
     };
     const storedRefreshToken = {
       id: decodedPayload.jti,
@@ -357,6 +372,23 @@ describe('AuthService', () => {
       );
       (argon2.verify as jest.Mock).mockResolvedValue(true);
       mockPrismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.refresh(refreshToken)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrismaService.refreshToken.update).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when the account is suspended', async () => {
+      mockJwtService.verify.mockReturnValue(decodedPayload);
+      mockPrismaService.refreshToken.findUnique.mockResolvedValue(
+        storedRefreshToken,
+      );
+      (argon2.verify as jest.Mock).mockResolvedValue(true);
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        ...existingUser,
+        isSuspended: true,
+      });
 
       await expect(service.refresh(refreshToken)).rejects.toThrow(
         UnauthorizedException,
@@ -528,6 +560,7 @@ describe('AuthService', () => {
         email: params.email,
         name: params.name,
         role: 'CUSTOMER',
+        isSuspended: false,
       };
       mockPrismaService.user.findUnique.mockResolvedValueOnce(existingUser);
 
@@ -535,17 +568,38 @@ describe('AuthService', () => {
 
       expect(mockPrismaService.user.findUnique).toHaveBeenCalledWith({
         where: { googleId: params.googleId },
-        select: { id: true, email: true, name: true, role: true },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          isSuspended: true,
+        },
       });
       expect(mockPrismaService.user.create).not.toHaveBeenCalled();
       expect(mockPrismaService.user.update).not.toHaveBeenCalled();
       expect(result).toEqual(existingUser);
     });
 
+    it('throws UnauthorizedException when the account matched by googleId is suspended', async () => {
+      mockPrismaService.user.findUnique.mockResolvedValueOnce({
+        id: 'user-id',
+        email: params.email,
+        name: params.name,
+        role: 'CUSTOMER',
+        isSuspended: true,
+      });
+
+      await expect(service.validateGoogleUser(params)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
+    });
+
     it('links googleId to an existing verified-email account and returns it', async () => {
       mockPrismaService.user.findUnique
         .mockResolvedValueOnce(null) // by googleId
-        .mockResolvedValueOnce({ id: 'existing-user-id' }); // by email
+        .mockResolvedValueOnce({ id: 'existing-user-id', isSuspended: false }); // by email
       const updatedUser = {
         id: 'existing-user-id',
         email: params.email,
@@ -556,6 +610,10 @@ describe('AuthService', () => {
 
       const result = await service.validateGoogleUser(params);
 
+      expect(mockPrismaService.user.findUnique).toHaveBeenNthCalledWith(2, {
+        where: { email: params.email },
+        select: { id: true, isSuspended: true },
+      });
       expect(mockPrismaService.user.update).toHaveBeenCalledWith({
         where: { id: 'existing-user-id' },
         data: { googleId: params.googleId },
@@ -568,13 +626,24 @@ describe('AuthService', () => {
     it('throws UnauthorizedException instead of linking when the Google email is unverified', async () => {
       mockPrismaService.user.findUnique
         .mockResolvedValueOnce(null) // by googleId
-        .mockResolvedValueOnce({ id: 'existing-user-id' }); // by email
+        .mockResolvedValueOnce({ id: 'existing-user-id', isSuspended: false }); // by email
 
       await expect(
         service.validateGoogleUser({ ...params, emailVerified: false }),
       ).rejects.toThrow(UnauthorizedException);
       expect(mockPrismaService.user.update).not.toHaveBeenCalled();
       expect(mockPrismaService.user.create).not.toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when linking to an existing account that is suspended', async () => {
+      mockPrismaService.user.findUnique
+        .mockResolvedValueOnce(null) // by googleId
+        .mockResolvedValueOnce({ id: 'existing-user-id', isSuspended: true }); // by email
+
+      await expect(service.validateGoogleUser(params)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrismaService.user.update).not.toHaveBeenCalled();
     });
 
     it('creates a new user with the role from the caller when no match exists', async () => {

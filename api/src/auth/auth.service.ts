@@ -73,6 +73,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid password');
     }
 
+    if (user.isSuspended) {
+      throw new UnauthorizedException('Account is suspended');
+    }
+
     return this.issueTokens(user.id, user.role);
   }
 
@@ -115,6 +119,10 @@ export class AuthService {
       throw new UnauthorizedException('User no longer exists');
     }
 
+    if (user.isSuspended) {
+      throw new UnauthorizedException('Account is suspended');
+    }
+
     await this.prisma.refreshToken.update({
       where: { id: payload.jti },
       data: { revokedAt: new Date() },
@@ -155,21 +163,27 @@ export class AuthService {
 
     const existingByGoogleId = await this.prisma.user.findUnique({
       where: { googleId },
-      select,
+      select: { ...select, isSuspended: true },
     });
     if (existingByGoogleId) {
+      if (existingByGoogleId.isSuspended) {
+        throw new UnauthorizedException('Account is suspended');
+      }
       return existingByGoogleId;
     }
 
     const existingByEmail = await this.prisma.user.findUnique({
       where: { email },
-      select: { id: true },
+      select: { id: true, isSuspended: true },
     });
     if (existingByEmail) {
       if (!emailVerified) {
         throw new UnauthorizedException(
           'Google account email is not verified; cannot link to an existing account',
         );
+      }
+      if (existingByEmail.isSuspended) {
+        throw new UnauthorizedException('Account is suspended');
       }
       return this.prisma.user.update({
         where: { id: existingByEmail.id },

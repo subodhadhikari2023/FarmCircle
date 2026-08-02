@@ -17,6 +17,9 @@ describe('UsersService', () => {
       findMany: jest.fn(),
       create: jest.fn(),
     },
+    refreshToken: {
+      updateMany: jest.fn(),
+    },
   };
 
   beforeEach(async () => {
@@ -246,6 +249,9 @@ describe('UsersService', () => {
       };
       mockPrismaService.user.findFirst.mockResolvedValue(activeUser);
       mockPrismaService.user.update.mockResolvedValue(suspendedUser);
+      mockPrismaService.refreshToken.updateMany.mockResolvedValue({
+        count: 2,
+      });
 
       const result = await service.suspend('u1');
 
@@ -266,6 +272,28 @@ describe('UsersService', () => {
         },
       });
       expect(result).toEqual(suspendedUser);
+    });
+
+    it("revokes the user's active refresh tokens so existing sessions are killed immediately", async () => {
+      const activeUser = { id: 'u1', isSuspended: false };
+      mockPrismaService.user.findFirst.mockResolvedValue(activeUser);
+      mockPrismaService.user.update.mockResolvedValue({
+        id: 'u1',
+        isSuspended: true,
+      });
+      mockPrismaService.refreshToken.updateMany.mockResolvedValue({
+        count: 1,
+      });
+
+      await service.suspend('u1');
+
+      expect(mockPrismaService.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', revokedAt: null },
+        data: {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.any() is typed `any` in @types/jest; no cast survives the no-unnecessary-type-assertion autofix
+          revokedAt: expect.any(Date),
+        },
+      });
     });
 
     it('throws NotFoundException when the account does not exist or is a Grower/Admin', async () => {
