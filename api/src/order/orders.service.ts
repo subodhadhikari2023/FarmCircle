@@ -275,6 +275,13 @@ export class OrdersService {
     return updatedOrder;
   }
 
+  // DisputeOrderDto only ever carries CANCELLED (validated at the DTO
+  // layer) — this is a deliberate force-cancel-and-release-stock action,
+  // not a general status override. It used to accept any OrderStatus with
+  // no transition guard, letting an Admin force nonsensical transitions
+  // (e.g. DELIVERED -> PLACED); that capability was removed rather than
+  // guarded, since force-cancel was the only path this service actually
+  // handled safely.
   async dispute(adminId: string, id: string, dto: DisputeOrderDto) {
     const order = await this.prisma.order.findUnique({
       where: { id },
@@ -283,34 +290,39 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException('Order not found');
     }
-
-    const releasesStock =
-      dto.status === OrderStatus.CANCELLED &&
-      order.status !== OrderStatus.CANCELLED;
-
-    if (!releasesStock) {
-      const updatedOrder = await this.prisma.order.update({
-        where: { id },
-        data: { status: dto.status },
-      });
-      await this.logStatusChange(id, dto.status, adminId);
-      return updatedOrder;
+    if (order.status === OrderStatus.CANCELLED) {
+      throw new ConflictException('Order is already cancelled');
     }
 
-    const [updatedOrder] = await this.prisma.$transaction([
-      this.prisma.order.update({
-        where: { id },
-        data: { status: dto.status },
-      }),
-      this.prisma.listing.update({
-        where: { id: order.listingId },
-        data: {
-          availableQuantity:
-            order.listing.availableQuantity.toNumber() +
-            order.quantity.toNumber(),
-        },
-      }),
-    ]);
+    // Guarded on status so this can't double-release stock if the order was
+    // already cancelled by someone else (e.g. the buyer) between the read
+    // above and this transaction. Restoring via { increment } rather than a
+    // computed absolute value also avoids losing another order's concurrent
+    // stock change on the same listing.
+    const updatedOrder = await (async () => {
+      try {
+        const [disputedOrder] = await this.prisma.$transaction([
+          this.prisma.order.update({
+            where: { id, status: { not: OrderStatus.CANCELLED } },
+            data: { status: dto.status },
+          }),
+          this.prisma.listing.update({
+            where: { id: order.listingId },
+            data: {
+              availableQuantity: { increment: order.quantity.toNumber() },
+            },
+          }),
+        ]);
+        return disputedOrder;
+      } catch (err) {
+        if (this.isRecordNotFound(err)) {
+          throw new ConflictException(
+            'Order status changed concurrently; retry the dispute resolution',
+          );
+        }
+        throw err;
+      }
+    })();
     await this.logStatusChange(id, dto.status, adminId);
     return updatedOrder;
   }

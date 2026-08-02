@@ -742,6 +742,26 @@ describe('OrderModule (e2e)', () => {
       });
       expect(updatedListing.availableQuantity.toNumber()).toBe(100);
     });
+
+    it('returns 400 when the Admin attempts to force any status other than CANCELLED', async () => {
+      const grower = await createUser(Role.GROWER, 'dispute-badstatus-grower');
+      const customer = await createUser(
+        Role.CUSTOMER,
+        'dispute-badstatus-cust',
+      );
+      const admin = await createUser(Role.ADMIN, 'dispute-badstatus-admin');
+      const adminToken = await loginAndGetToken(admin.email);
+      const crop = await createCrop(grower.id, 'Radish');
+      const variety = await createVariety(crop.id, 'Red Radish');
+      const listing = await createListing(grower.id, crop.id, variety.id);
+      const order = await createOrder(customer.id, listing.id);
+
+      await request(app.getHttpServer())
+        .patch(`/orders/${order.id}/dispute`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: OrderStatus.DELIVERED })
+        .expect(400);
+    });
   });
 
   describe('POST /orders with ONLINE/UPI payment', () => {

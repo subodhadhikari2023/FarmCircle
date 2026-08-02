@@ -663,34 +663,6 @@ describe('OrdersService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('force-sets the status without validating the normal transition table, logging the admin as the changer', async () => {
-      mockPrismaService.order.findUnique.mockResolvedValue({
-        id: 'o1',
-        status: OrderStatus.PLACED,
-        listingId: 'l1',
-        quantity: decimal(5),
-        listing: { id: 'l1', availableQuantity: decimal(95) },
-      });
-      const updated = { id: 'o1', status: OrderStatus.DELIVERED };
-      mockPrismaService.order.update.mockResolvedValue(updated);
-
-      const result = await service.dispute('admin1', 'o1', {
-        status: OrderStatus.DELIVERED,
-      });
-
-      expect(mockPrismaService.order.update).toHaveBeenCalledWith({
-        where: { id: 'o1' },
-        data: { status: OrderStatus.DELIVERED },
-      });
-      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
-      expect(mockHistoryModel.create).toHaveBeenCalledWith({
-        orderId: 'o1',
-        status: OrderStatus.DELIVERED,
-        changedBy: 'admin1',
-      });
-      expect(result).toEqual(updated);
-    });
-
     it('releases stock back to the listing when forcing an order to CANCELLED', async () => {
       mockPrismaService.order.findUnique.mockResolvedValue({
         id: 'o1',
@@ -708,14 +680,34 @@ describe('OrdersService', () => {
         status: OrderStatus.CANCELLED,
       });
 
+      expect(mockPrismaService.order.update).toHaveBeenCalledWith({
+        where: { id: 'o1', status: { not: OrderStatus.CANCELLED } },
+        data: { status: OrderStatus.CANCELLED },
+      });
       expect(mockPrismaService.listing.update).toHaveBeenCalledWith({
         where: { id: 'l1' },
-        data: { availableQuantity: 100 },
+        data: { availableQuantity: { increment: 5 } },
       });
       expect(result).toEqual(updatedOrder);
     });
 
-    it('does not double-release stock when the order is already CANCELLED', async () => {
+    it('throws ConflictException, without logging a status change, when the order was already cancelled by a concurrent request', async () => {
+      mockPrismaService.order.findUnique.mockResolvedValue({
+        id: 'o1',
+        status: OrderStatus.CONFIRMED,
+        listingId: 'l1',
+        quantity: decimal(5),
+        listing: { id: 'l1', availableQuantity: decimal(95) },
+      });
+      mockPrismaService.$transaction.mockRejectedValue(recordNotFoundError());
+
+      await expect(
+        service.dispute('admin1', 'o1', { status: OrderStatus.CANCELLED }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockHistoryModel.create).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException, without touching stock, when the order is already CANCELLED', async () => {
       mockPrismaService.order.findUnique.mockResolvedValue({
         id: 'o1',
         status: OrderStatus.CANCELLED,
@@ -723,12 +715,13 @@ describe('OrdersService', () => {
         quantity: decimal(5),
         listing: { id: 'l1', availableQuantity: decimal(100) },
       });
-      const updated = { id: 'o1', status: OrderStatus.CANCELLED };
-      mockPrismaService.order.update.mockResolvedValue(updated);
 
-      await service.dispute('admin1', 'o1', { status: OrderStatus.CANCELLED });
+      await expect(
+        service.dispute('admin1', 'o1', { status: OrderStatus.CANCELLED }),
+      ).rejects.toThrow(ConflictException);
 
       expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(mockPrismaService.order.update).not.toHaveBeenCalled();
       expect(mockPrismaService.listing.update).not.toHaveBeenCalled();
     });
   });

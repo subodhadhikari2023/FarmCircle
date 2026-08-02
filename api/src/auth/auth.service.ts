@@ -3,6 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto, RegisterableRoles } from './dto/register.dto';
@@ -244,5 +245,19 @@ export class AuthService {
       },
     });
     return { accessToken, refreshToken };
+  }
+
+  // Both expired and revoked rows are permanently unusable (there's no
+  // audit requirement to keep them around), so the table would otherwise
+  // grow forever — every login/refresh/reuse-detection writes at least one
+  // row and never deletes it. Runs daily since staleness here has no
+  // user-facing time pressure, unlike the pre-booking hold sweep.
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async cleanupStaleRefreshTokens() {
+    await this.prisma.refreshToken.deleteMany({
+      where: {
+        OR: [{ expiresAt: { lt: new Date() } }, { revokedAt: { not: null } }],
+      },
+    });
   }
 }
