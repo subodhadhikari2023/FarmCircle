@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -18,6 +19,15 @@ import { LoginDto } from './dto/login.dto';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { GoogleCallbackAuthGuard } from './guards/google-callback-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+
+// Read directly from process.env (not ConfigService) because @Throttle()'s
+// argument must be a static value available at decorator-evaluation time,
+// before Nest's DI container exists. Defaults to a strict production value;
+// local/CI/e2e environments set AUTH_THROTTLE_LIMIT to something loose so
+// the test suite's many rapid login/register calls aren't throttled.
+const AUTH_THROTTLE_LIMIT = Number(process.env.AUTH_THROTTLE_LIMIT ?? 5);
+const AUTH_THROTTLE_TTL_MS = 60_000;
+
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -26,11 +36,17 @@ export class AuthController {
   ) {}
 
   @Post('register')
+  @Throttle({
+    default: { limit: AUTH_THROTTLE_LIMIT, ttl: AUTH_THROTTLE_TTL_MS },
+  })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
   @Post('login')
+  @Throttle({
+    default: { limit: AUTH_THROTTLE_LIMIT, ttl: AUTH_THROTTLE_TTL_MS },
+  })
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() dto: LoginDto,

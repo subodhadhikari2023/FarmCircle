@@ -226,18 +226,37 @@ export class BatchesService {
   }
 
   async getTimeline(id: string) {
+    // Public and unauthenticated — only expose the milestone timeline once
+    // there's a published, tracked-path Listing for this batch (matches the
+    // requirements doc's "buyers of hasTrackedCycle listings" scope), and
+    // only the milestone names/dates, never Grower-only batch fields like
+    // predictedYield, quantity, or ownerId.
     const batch = await this.prisma.batch.findUnique({
       where: { id },
       include: {
+        listing: true,
         milestoneProgress: {
           orderBy: { order: 'asc' },
           include: { milestone: true },
         },
       },
     });
-    if (!batch) {
+    if (
+      !batch ||
+      !batch.listing?.isPublished ||
+      !batch.listing.hasTrackedCycle
+    ) {
       throw new NotFoundException('Batch not found');
     }
-    return batch;
+
+    return {
+      batchId: batch.id,
+      milestones: batch.milestoneProgress.map((progress) => ({
+        name: progress.milestone.name,
+        order: progress.order,
+        expectedDurationDays: progress.milestone.expectedDurationDays,
+        reachedAt: progress.reachedAt,
+      })),
+    };
   }
 }

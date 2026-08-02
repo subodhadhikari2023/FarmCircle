@@ -3,6 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto, RegisterableRoles } from './dto/register.dto';
@@ -73,6 +74,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid password');
     }
 
+    if (user.isSuspended) {
+      throw new UnauthorizedException('Account is suspended');
+    }
+
     return this.issueTokens(user.id, user.role);
   }
 
@@ -95,6 +100,16 @@ export class AuthService {
     }
 
     if (stored.revokedAt) {
+      // A token that's already been rotated away being presented again
+      // means either the legitimate client double-submitted, or an
+      // attacker stole it before rotation. We can't tell those apart, so
+      // treat it as theft: kill every active session for this user, not
+      // just the reused token, so a stolen-then-rotated refresh token
+      // can't keep a parallel attacker session alive.
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: stored.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
       throw new UnauthorizedException('Refresh token reuse detected');
     }
 
@@ -113,6 +128,10 @@ export class AuthService {
 
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
+    }
+
+    if (user.isSuspended) {
+      throw new UnauthorizedException('Account is suspended');
     }
 
     await this.prisma.refreshToken.update({
@@ -155,21 +174,27 @@ export class AuthService {
 
     const existingByGoogleId = await this.prisma.user.findUnique({
       where: { googleId },
-      select,
+      select: { ...select, isSuspended: true },
     });
     if (existingByGoogleId) {
+      if (existingByGoogleId.isSuspended) {
+        throw new UnauthorizedException('Account is suspended');
+      }
       return existingByGoogleId;
     }
 
     const existingByEmail = await this.prisma.user.findUnique({
       where: { email },
-      select: { id: true },
+      select: { id: true, isSuspended: true },
     });
     if (existingByEmail) {
       if (!emailVerified) {
         throw new UnauthorizedException(
           'Google account email is not verified; cannot link to an existing account',
         );
+      }
+      if (existingByEmail.isSuspended) {
+        throw new UnauthorizedException('Account is suspended');
       }
       return this.prisma.user.update({
         where: { id: existingByEmail.id },
@@ -220,5 +245,19 @@ export class AuthService {
       },
     });
     return { accessToken, refreshToken };
+  }
+
+  // Both expired and revoked rows are permanently unusable (there's no
+  // audit requirement to keep them around), so the table would otherwise
+  // grow forever — every login/refresh/reuse-detection writes at least one
+  // row and never deletes it. Runs daily since staleness here has no
+  // user-facing time pressure, unlike the pre-booking hold sweep.
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async cleanupStaleRefreshTokens() {
+    await this.prisma.refreshToken.deleteMany({
+      where: {
+        OR: [{ expiresAt: { lt: new Date() } }, { revokedAt: { not: null } }],
+      },
+    });
   }
 }

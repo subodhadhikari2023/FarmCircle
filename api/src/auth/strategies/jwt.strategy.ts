@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { Role } from 'generated/prisma/enums';
+import { PrismaService } from '../../prisma/prisma.service';
 
 export interface JwtAccessPayload {
   sub: string;
@@ -16,7 +17,10 @@ export interface AuthenticatedUser {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -24,10 +28,22 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  validate(payload: JwtAccessPayload): AuthenticatedUser {
+  async validate(payload: JwtAccessPayload): Promise<AuthenticatedUser> {
     if (!payload.sub || !payload.role) {
       throw new UnauthorizedException('Invalid access token payload');
     }
-    return { id: payload.sub, role: payload.role };
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, role: true, isSuspended: true },
+    });
+
+    if (!user || user.isSuspended) {
+      throw new UnauthorizedException(
+        'Account is suspended or no longer exists',
+      );
+    }
+
+    return { id: user.id, role: user.role };
   }
 }

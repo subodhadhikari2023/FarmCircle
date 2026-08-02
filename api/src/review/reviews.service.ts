@@ -6,11 +6,24 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { OrderStatus } from 'generated/prisma/enums';
+import { Prisma } from 'generated/prisma/client';
 
 const REVIEWABLE_STATUSES: OrderStatus[] = [
   OrderStatus.DELIVERED,
   OrderStatus.PICKED_UP,
 ];
+
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+
+function paginationParams(page?: string, limit?: string) {
+  const pageNumber = Math.max(1, Math.trunc(Number(page)) || 1);
+  const pageSize = Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, Math.trunc(Number(limit)) || DEFAULT_PAGE_SIZE),
+  );
+  return { skip: (pageNumber - 1) * pageSize, take: pageSize };
+}
 
 @Injectable()
 export class ReviewsService {
@@ -35,21 +48,41 @@ export class ReviewsService {
       throw new ConflictException('Order has already been reviewed');
     }
 
-    return this.prisma.review.create({
-      data: {
-        reviewerId: userId,
-        growerId: order.listing.ownerId,
-        orderId: order.id,
-        rating: dto.rating,
-        comment: dto.comment,
-      },
-    });
+    // The findUnique check above is a fast path, not the real guard — the
+    // @unique constraint on Review.orderId is what actually prevents two
+    // concurrent submissions for the same order from both succeeding. A
+    // race that slips past the check above hits that constraint here and
+    // must be translated from a raw P2002 into the same 409 the check
+    // above would have given.
+    try {
+      return await this.prisma.review.create({
+        data: {
+          reviewerId: userId,
+          growerId: order.listing.ownerId,
+          orderId: order.id,
+          rating: dto.rating,
+          comment: dto.comment,
+        },
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException('Order has already been reviewed');
+      }
+      throw err;
+    }
   }
 
-  findAll() {
+  findAll(page?: string, limit?: string) {
+    const { skip, take } = paginationParams(page, limit);
     return this.prisma.review.findMany({
       where: { isHidden: false },
       include: { reviewer: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take,
     });
   }
 
@@ -75,10 +108,14 @@ export class ReviewsService {
     });
   }
 
-  findHidden() {
+  findHidden(page?: string, limit?: string) {
+    const { skip, take } = paginationParams(page, limit);
     return this.prisma.review.findMany({
       where: { isHidden: true },
       include: { reviewer: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take,
     });
   }
 

@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { Order, Prisma } from 'generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RazorpayClient } from './razorpay-client.service';
@@ -77,6 +78,15 @@ export class PaymentsService {
     if (preBooking.status !== PreBookingStatus.AWAITING_PAYMENT) {
       throw new BadRequestException(
         'Payment intent is only available once the pre-booking is awaiting payment',
+      );
+    }
+
+    const listing = await this.prisma.listing.findUniqueOrThrow({
+      where: { id: preBooking.listingId! },
+    });
+    if (listing.isClosed) {
+      throw new ConflictException(
+        'This listing has been closed and can no longer be paid for',
       );
     }
 
@@ -189,49 +199,91 @@ export class PaymentsService {
     const preBooking = await this.prisma.preBooking.findUnique({
       where: { id: payment.preBookingId },
     });
-    if (
-      !preBooking ||
-      preBooking.status !== PreBookingStatus.AWAITING_PAYMENT
-    ) {
+    if (!preBooking) {
       return { received: true };
+    }
+    if (preBooking.status === PreBookingStatus.CONFIRMED) {
+      // Already processed by an earlier delivery of this same webhook
+      // event (Razorpay retries on timeout) — idempotent no-op.
+      return { received: true };
+    }
+    if (preBooking.status !== PreBookingStatus.AWAITING_PAYMENT) {
+      // EXPIRED/CANCELLED: the 48h cron sweep (or a manual path) already
+      // moved this pre-booking on before the webhook arrived. Razorpay has
+      // genuinely captured the money, so record that honestly instead of
+      // leaving the Payment stuck PENDING forever — but no Order can be
+      // created since the hold/capacity was already released. This is a
+      // manual-reconciliation case (refund or manual order), the same
+      // class of gap as the OrderIntent stock-race below, not auto-solved.
+      return this.recordCapturedPaymentWithoutOrder(
+        payment.id,
+        razorpayPaymentId,
+      );
     }
 
     const listing = await this.prisma.listing.findUniqueOrThrow({
       where: { id: preBooking.listingId! },
     });
+    if (listing.isClosed) {
+      return this.recordCapturedPaymentWithoutOrder(
+        payment.id,
+        razorpayPaymentId,
+      );
+    }
 
-    const order = await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: { razorpayPaymentId, status: PaymentStatus.SUCCESS },
+    let order: Order;
+    try {
+      order = await this.prisma.$transaction(async (tx) => {
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { razorpayPaymentId, status: PaymentStatus.SUCCESS },
+        });
+        // Guarded on status so a concurrent cron expiry can't be silently
+        // overwritten back to CONFIRMED after having already released
+        // capacity, and guarded on stock/isClosed so this can't oversell
+        // or sell against a listing the Grower has since closed.
+        await tx.preBooking.update({
+          where: {
+            id: preBooking.id,
+            status: PreBookingStatus.AWAITING_PAYMENT,
+          },
+          data: { status: PreBookingStatus.CONFIRMED },
+        });
+        const createdOrder = await tx.order.create({
+          data: {
+            buyerId: preBooking.vendorId,
+            listingId: listing.id,
+            quantity: preBooking.quantity,
+            unitPrice: listing.wholesalePrice,
+            totalAmount:
+              preBooking.quantity.toNumber() *
+              listing.wholesalePrice.toNumber(),
+            deliveryMethod: DeliveryMethod.PICKUP,
+            paymentMethod: PaymentMethod.ONLINE,
+            preBookingId: preBooking.id,
+          },
+        });
+        await tx.listing.update({
+          where: {
+            id: listing.id,
+            isClosed: false,
+            availableQuantity: { gte: preBooking.quantity.toNumber() },
+          },
+          data: {
+            availableQuantity: { decrement: preBooking.quantity.toNumber() },
+          },
+        });
+        return createdOrder;
       });
-      await tx.preBooking.update({
-        where: { id: preBooking.id },
-        data: { status: PreBookingStatus.CONFIRMED },
-      });
-      const createdOrder = await tx.order.create({
-        data: {
-          buyerId: preBooking.vendorId,
-          listingId: listing.id,
-          quantity: preBooking.quantity,
-          unitPrice: listing.wholesalePrice,
-          totalAmount:
-            preBooking.quantity.toNumber() * listing.wholesalePrice.toNumber(),
-          deliveryMethod: DeliveryMethod.PICKUP,
-          paymentMethod: PaymentMethod.ONLINE,
-          preBookingId: preBooking.id,
-        },
-      });
-      await tx.listing.update({
-        where: { id: listing.id },
-        data: {
-          availableQuantity:
-            listing.availableQuantity.toNumber() -
-            preBooking.quantity.toNumber(),
-        },
-      });
-      return createdOrder;
-    });
+    } catch (err) {
+      if (this.isRecordNotFound(err)) {
+        return this.recordCapturedPaymentWithoutOrder(
+          payment.id,
+          razorpayPaymentId,
+        );
+      }
+      throw err;
+    }
 
     await this.historyModel.create({
       orderId: order.id,
@@ -240,6 +292,30 @@ export class PaymentsService {
     });
     await this.redis.clearPaymentHold(preBooking.id);
 
+    return { received: true };
+  }
+
+  private isRecordNotFound(err: unknown): boolean {
+    return (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2025'
+    );
+  }
+
+  // Records that Razorpay genuinely captured the money even though no
+  // Order could be created (the hold expired, the listing closed, or
+  // stock ran out concurrently) — leaving the Payment PENDING would hide
+  // that money was taken. This is intentionally not auto-resolved further
+  // (no auto-refund, no auto-order); it's a flagged manual-reconciliation
+  // case, same as the OrderIntent stock-race gap.
+  private async recordCapturedPaymentWithoutOrder(
+    paymentId: string,
+    razorpayPaymentId: string,
+  ) {
+    await this.prisma.payment.updateMany({
+      where: { id: paymentId, status: { not: PaymentStatus.SUCCESS } },
+      data: { razorpayPaymentId, status: PaymentStatus.SUCCESS },
+    });
     return { received: true };
   }
 
