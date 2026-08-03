@@ -48,6 +48,7 @@ Loaded via `next/font/google` (avoids layout shift, no CDN `<link>`).
 **Weight budget — don't introduce a weight outside these:**
 - Space Grotesk: 500 / 650 only (loaded as a variable font so 650 is reachable)
 - Inter: 400 / 500 / 600 only
+- JetBrains Mono: 400 / 500 only
 
 ## 3. Text (voice & content rules)
 
@@ -73,7 +74,7 @@ Loaded via `next/font/google` (avoids layout shift, no CDN `<link>`).
 
 **Elevation**: subtle brand-color glow instead of generic black drop-shadows — ties elevation to brand identity (the hero's core glow is the reference implementation). Reserve the glow for primary/active states only, not every card.
 
-**Icons**: Material Symbols, via the `material-symbols` npm package (self-hosted SVG/font subset, no MUI dependency). Not installed yet — nothing on the site needs an icon yet. Install with `npm install material-symbols` in `web/` when the first one is needed.
+**Icons**: Material Symbols, via the `material-symbols` npm package (self-hosted SVG/font subset, no MUI dependency). Installed and in active use across the Grower/Vendor/Customer/Admin dashboards (`import "material-symbols/outlined.css"` in `web/src/app/layout.tsx`).
 
 **Responsive strategy ("layout shifter")**: reflow via CSS/Tailwind responsive classes on a single component tree (`grid-cols`, `flex-direction`, `order`, etc.) — the industry-standard default, and what the landing page already does. Reserve separate component trees per breakpoint for cases where the *interaction* genuinely diverges (e.g. a mobile drawer nav vs. desktop inline nav), and even then prefer one component conditionally showing/hiding pieces over duplicate files.
 
