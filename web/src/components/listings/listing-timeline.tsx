@@ -5,10 +5,10 @@ export function ListingTimeline({ timeline }: { timeline: BatchTimeline }) {
     <div className="mt-8 border-t border-border pt-8">
       <h2 className="text-lg font-[650]">Growth timeline</h2>
       <ol className="mt-4 flex flex-col gap-4">
-        {timeline.milestoneProgress.map((progress) => {
-          const reached = progress.reachedAt !== null;
+        {timeline.milestones.map((milestone) => {
+          const reached = milestone.reachedAt !== null;
           return (
-            <li key={progress.order} className="flex items-start gap-3">
+            <li key={milestone.order} className="flex items-start gap-3">
               <span
                 className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
                   reached ? "bg-success-600" : "bg-border"
@@ -21,12 +21,12 @@ export function ListingTimeline({ timeline }: { timeline: BatchTimeline }) {
                     reached ? "text-foreground" : "text-muted"
                   }`}
                 >
-                  {progress.milestone.name}
+                  {milestone.name}
                 </p>
                 <p className="text-xs text-muted">
-                  {progress.reachedAt
-                    ? `Reached ${new Date(progress.reachedAt).toLocaleDateString()}`
-                    : `Expected in ~${progress.milestone.expectedDurationDays} days`}
+                  {milestone.reachedAt
+                    ? `Reached ${new Date(milestone.reachedAt).toLocaleDateString()}`
+                    : `Expected in ~${milestone.expectedDurationDays} days`}
                 </p>
               </div>
             </li>
