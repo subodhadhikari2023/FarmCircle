@@ -52,7 +52,7 @@ Two paths to create a Listing:
 2. **Direct path:** Crop → Listing directly, bypassing Cycle/Batch tracking. Primarily intended for bootstrapping/onboarding existing stock, especially in early phases before cycle-tracking is fully adopted.
 
 - Listings created via the tracked path expose a **read-only milestone/timeline view** to buyers. Listings via the direct path do not have this data (`hasTrackedCycle` flag distinguishes the two).
-- **Cycle-end → Listing workflow:** When a Batch reaches its final milestone (harvest-ready), the system **auto-generates a draft Listing**. The draft remains unpublished until the Grower confirms the **actual harvested quantity** (predicted yield ≠ actual yield). Once confirmed, the Listing goes live. This is also the trigger point for validating and confirming any queued pre-bookings against real, confirmed stock.
+- **Cycle-end → Listing workflow:** When a Batch reaches its final milestone (harvest-ready), the Grower sets listing terms (price, wholesale MOQ, retail ceiling %, pre-bookable %) for that batch, which creates the Listing as an **unpublished draft**. The Grower then confirms the **actual harvested quantity** (predicted yield ≠ actual yield), which sets it and publishes the Listing — confirming harvest is rejected if listing terms haven't been set yet. This is also the trigger point for validating and confirming any queued pre-bookings against real, confirmed stock.
 - **Price snapshotting (critical rule):** Once a Listing is published, its `retailPrice`, `wholesalePrice`, and `minWholesaleQty` are **locked for the life of that listing**, regardless of any later pricing changes the grower makes. Price changes only apply to **new** listings created afterward. Existing listings retain their original price until stock is fully sold.
 - Each Listing defines:
   - `retailPrice` — for Customers
@@ -171,14 +171,14 @@ Note: the business-wide analytics dashboard is a **Grower** capability (§3.5), 
 | Document DB | MongoDB + Mongoose |
 | Cache/Locks | Redis |
 | Auth | JWT (access + refresh) + Google OAuth (Passport) |
-| Password hashing | bcrypt |
+| Password hashing | Argon2 |
 | Payments | Razorpay (test/sandbox mode) — full real integration (Checkout UI, signature verification, webhooks), only actual money movement is fake |
 | Testing | Jest — **strict TDD** for NestJS backend business logic (pricing/eligibility calculations, order/pre-booking state transitions, auth guards); lighter/after-the-fact testing for Next.js frontend and third-party integration glue (Razorpay webhooks, OAuth callbacks) |
 | Containerization | Docker |
-| CI/CD | GitHub Actions, self-hosted runner |
+| CI/CD | GitHub Actions (GitHub-hosted runners) — CI on every PR, plus a separate Deploy workflow that builds/pushes the API image to GHCR, runs prod migrations, and redeploys on every push to `main` |
 | Repo structure | Monorepo, plain (no Turborepo) |
 | Frontend deployment | Vercel |
-| Backend deployment | Oracle Cloud VM |
+| Backend deployment | Render, pulling a pre-built image from GHCR (not building from source on the platform) |
 
 ---
 

@@ -21,14 +21,18 @@ Following the same principle established earlier in this project (relational/tra
 
 ```prisma
 // schema.prisma
+// Prisma 7 style: custom output path + driver adapter, no bare DATABASE_URL
+// client — see prisma.config.ts for the actual connection config.
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+  moduleFormat = "cjs"
+  importFileExtension = ""
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ─── Enums ───────────────────────────────────────────────
@@ -95,13 +99,31 @@ model User {
   listings    Listing[]
 
   // Buyer-side relations
-  ordersAsBuyer Order[]      @relation("BuyerOrders")
+  ordersAsBuyer Order[]       @relation("BuyerOrders")
+  orderIntents  OrderIntent[]
   preBookings   PreBooking[]
   addresses     Address[]
+
+  // RefreshToken
+  refreshTokens RefreshToken[]
 
   // Review relations (a User can both give reviews and, if Grower, receive them)
   reviewsGiven    Review[] @relation("ReviewerReviews")
   reviewsReceived Review[] @relation("GrowerReviews")
+}
+
+// ─── Auth Sessions ───────────────────────────────────────
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 // ─── Catalog ─────────────────────────────────────────────
@@ -231,8 +253,11 @@ model Listing {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  orders      Order[]
-  preBookings PreBooking[]
+  orders       Order[]
+  orderIntents OrderIntent[]
+  preBookings  PreBooking[]
+
+  @@index([ownerId])
 }
 
 // ─── Orders ─────────────────────────────────────────────
@@ -247,7 +272,8 @@ model Address {
   longitude   Float
   createdAt   DateTime @default(now())
 
-  orders Order[]
+  orders       Order[]
+  orderIntents OrderIntent[]
 }
 
 model Order {
@@ -271,6 +297,32 @@ model Order {
 
   payment Payment?
   review  Review?
+
+  @@index([buyerId])
+  @@index([listingId])
+  @@index([status])
+}
+
+// Snapshot of a would-be Order's details, created for UPI/ONLINE checkouts
+// before payment is confirmed — the real Order is only created once the
+// Razorpay webhook confirms payment.captured (see PaymentsService.handleWebhook).
+// COD orders skip this entirely since payment isn't gating anything.
+model OrderIntent {
+  id             String         @id @default(uuid())
+  buyerId        String
+  buyer          User           @relation(fields: [buyerId], references: [id])
+  listingId      String
+  listing        Listing        @relation(fields: [listingId], references: [id])
+  quantity       Decimal
+  unitPrice      Decimal
+  totalAmount    Decimal
+  deliveryMethod DeliveryMethod
+  addressId      String?
+  address        Address?       @relation(fields: [addressId], references: [id])
+  paymentMethod  PaymentMethod
+  createdAt      DateTime       @default(now())
+
+  payment Payment?
 }
 
 // ─── Pre-bookings ───────────────────────────────────────
@@ -292,6 +344,10 @@ model PreBooking {
 
   order   Order?
   payment Payment?
+
+  @@index([vendorId])
+  @@index([batchId])
+  @@index([status])
 }
 
 // ─── Payments ───────────────────────────────────────────
@@ -302,6 +358,8 @@ model Payment {
   order              Order?        @relation(fields: [orderId], references: [id])
   preBookingId       String?       @unique
   preBooking         PreBooking?   @relation(fields: [preBookingId], references: [id])
+  orderIntentId      String?       @unique
+  orderIntent        OrderIntent?  @relation(fields: [orderIntentId], references: [id])
   razorpayOrderId    String?
   razorpayPaymentId  String?
   razorpaySignature  String?
@@ -310,6 +368,8 @@ model Payment {
   status             PaymentStatus @default(PENDING)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
+
+  @@index([razorpayOrderId])
 }
 
 // ─── Reviews ────────────────────────────────────────────
@@ -334,63 +394,104 @@ model Review {
 - `Batch.cycleId` and `Listing.batchId` are both nullable — this is exactly how the two Listing creation paths (tracked vs. direct) are represented: a direct-path Batch/Listing simply has no Cycle/Batch reference.
 - `BatchMilestoneProgress` is a **snapshot table**, not a live join to `Milestone` — each row copies the `order` value at Batch-creation time, so later edits to the Cycle template (now allowed, per your confirmed decision) never retroactively alter a Batch already in progress.
 - `Listing`'s pricing/percentage fields have no `updatedAt`-triggered change path in the application logic — they're written once at creation and never touched again, enforcing price-snapshotting at the schema level (the application layer must simply never expose a way to PATCH these specific fields, since Prisma itself won't stop you from writing to them).
-- `Order.preBookingId` and `Payment.orderId` / `Payment.preBookingId` are all nullable/optional — an `Order` can exist either from a direct purchase or from a converted pre-booking, and a `Payment` can belong to either, reflecting the shared `PaymentModule` design.
+- `Order.preBookingId` and `Payment.orderId` / `Payment.preBookingId` / `Payment.orderIntentId` are all nullable/optional — an `Order` can exist either from a direct purchase or from a converted pre-booking, and a `Payment` can belong to an `Order`, a `PreBooking`, or an `OrderIntent` (the UPI/ONLINE pre-`Order` snapshot, before the webhook confirms payment and creates the real `Order`), reflecting the shared `PaymentModule` design.
 - `Review.orderId` is marked `@unique` — this is what enforces "one review per completed order" directly at the database level, not just in application logic.
 
 ---
 
 ## 3. MongoDB Schema (Mongoose)
 
+Implemented as NestJS `@nestjs/mongoose` decorator-based schema classes (not raw `new Schema({...})`), matching the rest of the codebase's NestJS idioms:
+
 ```typescript
 // listing-content.schema.ts
 // Flexible, per-listing supplementary content — varies by crop type
-import { Schema, model } from 'mongoose';
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument } from 'mongoose';
 
-const ListingContentSchema = new Schema({
-  listingId: { type: String, required: true, index: true }, // references Postgres Listing.id
-  description: { type: String },
-  images: [{ type: String }], // URLs
-  isOrganicCertified: { type: Boolean, default: false },
-  attributes: { type: Schema.Types.Mixed }, // free-form: e.g. { color: 'red', size: 'medium' } — varies per crop
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-});
+export type ListingContentDocument = HydratedDocument<ListingContent>;
 
-export const ListingContent = model('ListingContent', ListingContentSchema);
+@Schema({ timestamps: true }) // auto-manages createdAt + updatedAt (updatedAt refreshes on every save)
+export class ListingContent {
+  @Prop({ required: true, index: true })
+  listingId: string; // references Postgres Listing.id
+
+  @Prop()
+  description?: string;
+
+  @Prop({ type: [String], default: [] })
+  images: string[]; // URLs
+
+  @Prop({ default: false })
+  isOrganicCertified: boolean;
+
+  @Prop({ type: Object })
+  attributes?: Record<string, unknown>; // free-form: e.g. { color: 'red', size: 'medium' } — varies per crop
+}
+
+export const ListingContentSchema = SchemaFactory.createForClass(ListingContent);
 ```
 
 ```typescript
 // batch-activity-log.schema.ts
 // Freeform grower notes/observations per batch, independent of formal milestone progress.
 // This is also the designed extension point for future ML/IoT-based auto-logging (per requirements §3.3).
-import { Schema, model } from 'mongoose';
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument } from 'mongoose';
 
-const BatchActivityLogSchema = new Schema({
-  batchId: { type: String, required: true, index: true }, // references Postgres Batch.id
-  note: { type: String },
-  photos: [{ type: String }], // URLs
-  source: { type: String, enum: ['manual', 'ml_model', 'iot_sensor'], default: 'manual' }, // future-ready
-  loggedAt: { type: Date, default: Date.now },
-});
+export type BatchActivityLogDocument = HydratedDocument<BatchActivityLog>;
+export type BatchActivityLogSource = 'manual' | 'ml_model' | 'iot_sensor';
 
-export const BatchActivityLog = model('BatchActivityLog', BatchActivityLogSchema);
+// createdAt is renamed to loggedAt; updatedAt is deliberately disabled —
+// these are append-only log entries, never edited after creation.
+@Schema({ timestamps: { createdAt: 'loggedAt', updatedAt: false } })
+export class BatchActivityLog {
+  @Prop({ required: true, index: true })
+  batchId: string; // references Postgres Batch.id
+
+  @Prop()
+  note?: string;
+
+  @Prop({ type: [String], default: [] })
+  photos: string[]; // URLs
+
+  @Prop({ enum: ['manual', 'ml_model', 'iot_sensor'], default: 'manual' })
+  source: BatchActivityLogSource; // future-ready
+
+  loggedAt?: Date;
+}
+
+export const BatchActivityLogSchema = SchemaFactory.createForClass(BatchActivityLog);
 ```
 
 ```typescript
 // order-status-history.schema.ts
 // Append-only audit trail of order status changes — useful for dispute resolution (Admin)
 // and for showing customers a detailed timeline, without bloating the relational Order table.
-import { Schema, model } from 'mongoose';
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument } from 'mongoose';
 
-const OrderStatusHistorySchema = new Schema({
-  orderId: { type: String, required: true, index: true }, // references Postgres Order.id
-  status: { type: String, required: true }, // mirrors OrderStatus enum values as strings
-  note: { type: String }, // e.g., delivery agent remark, dispute note
-  changedBy: { type: String }, // User id who triggered the change (Grower, Admin, or system)
-  changedAt: { type: Date, default: Date.now },
-});
+export type OrderStatusHistoryDocument = HydratedDocument<OrderStatusHistory>;
 
-export const OrderStatusHistory = model('OrderStatusHistory', OrderStatusHistorySchema);
+@Schema() // no timestamps option here — changedAt below is the one and only timestamp
+export class OrderStatusHistory {
+  @Prop({ required: true, index: true })
+  orderId: string; // references Postgres Order.id
+
+  @Prop({ required: true })
+  status: string; // mirrors OrderStatus enum values as strings
+
+  @Prop()
+  note?: string; // e.g., delivery agent remark, dispute note
+
+  @Prop()
+  changedBy?: string; // User id who triggered the change (Grower, Admin, or system)
+
+  @Prop({ default: Date.now })
+  changedAt: Date;
+}
+
+export const OrderStatusHistorySchema = SchemaFactory.createForClass(OrderStatusHistory);
 ```
 
 **Why these three, specifically:** each holds data that's either genuinely variable-shape (`attributes` on `ListingContent` differs per crop type) or is naturally append-only/log-like (`BatchActivityLog`, `OrderStatusHistory`) rather than a single mutable row — exactly the kind of data Mongoose/MongoDB handles more naturally than a rigid relational table would, without forcing you to add nullable columns for every possible crop-specific attribute in Postgres.
@@ -401,13 +502,13 @@ export const OrderStatusHistory = model('OrderStatusHistory', OrderStatusHistory
 
 | Key pattern | Purpose | TTL |
 |---|---|---|
-| `prebooking:queued:{batchId}` | Running atomic counter of total quantity queued against a batch's `preBookablePercent` cap | None (cleared/recalculated when batch's listing closes) |
+| `prebooking:queued:{batchId}` | Running atomic counter (Lua-scripted `reserveCapacity`/`releaseQueueCapacity`) of total quantity queued against a batch's `preBookablePercent` cap | None — no TTL is set; the counter only moves via individual pre-booking cancel/expiry decrementing it, there's no bulk clear/recalculation on listing close |
 | `prebooking:hold:{preBookingId}` | Marks an individual pre-booking's 48-hour payment window once `AWAITING_PAYMENT` begins | 48 hours |
 
 ---
 
 ## 5. Open Items Carried Forward
 
-1. **Cascade/delete behavior** — several relations (`Crop → Variety/Cycle/Batch`, `Cycle → Milestone`) will need explicit `onDelete` behavior decided in Prisma (e.g., `Restrict` vs. `Cascade`) once you start writing migrations — recommend `Restrict` everywhere data has business significance (you generally shouldn't be able to delete a Crop that has live Batches), to avoid silent data loss.
+1. **Cascade/delete behavior — still unset, migrations already exist.** Despite migrations being written and the schema being fully built out, most relations (`Crop → Variety/Cycle/Batch`, `Cycle → Milestone`, etc.) still have no explicit `onDelete` clause — Prisma/Postgres falls back to its implicit restrict-like default. The one deliberate exception is `RefreshToken.user`, which sets `onDelete: Cascade` (a user's refresh tokens should be deleted along with the user, not block their deletion). Recommend `Restrict` explicitly everywhere else data has business significance, to make the current implicit behavior a documented, intentional choice rather than an accident of Prisma's default.
 2. **Decimal precision** — `Decimal` fields (quantity, prices, percentages) will need explicit precision/scale set in the Postgres migration (e.g., `@db.Decimal(10, 2)`) — worth deciding standard precision across the board (e.g., 2 decimal places for currency, but quantity in kg might reasonably want more).
 3. **Address reuse** — `Address` is modeled as its own table linked to `User`, allowing a buyer to save multiple addresses and pick one per order. Confirm this matches your intent, versus a simpler embedded address directly on `Order`.

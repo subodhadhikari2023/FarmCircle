@@ -12,12 +12,12 @@
 
 | Method + Path | Access | Purpose | Success | Key failures |
 |---|---|---|---|---|
-| `POST /auth/register` | *(public)* | Register as Vendor or Customer, with role selection. Grower and Admin accounts are not self-registerable in v1 — seeded/created directly (single-business scope). | `201 Created` | `400` invalid input; `409` email already exists |
-| `POST /auth/login` | *(public)* | Email + password login, returns access token, sets refresh token as httpOnly cookie | `200 OK` | `401` invalid credentials |
-| `POST /auth/refresh` | *(public, requires valid refresh cookie)* | Issues a new access token using the refresh token | `200 OK` | `401` refresh token invalid/expired |
+| `POST /auth/register` | *(public)* | Register as Vendor or Customer, with role selection. Grower and Admin accounts are not self-registerable in v1 — seeded/created directly (single-business scope). Rate-limited (5 requests/60s in production; higher in local/CI). | `201 Created` | `400` invalid input; `409` email already exists; `429` rate limited |
+| `POST /auth/login` | *(public)* | Email + password login, returns access token, sets refresh token as httpOnly cookie. Rate-limited (5 requests/60s in production; higher in local/CI). | `200 OK` | `401` invalid credentials; `429` rate limited |
+| `POST /auth/refresh` | *(public, requires valid refresh cookie)* | Issues a new access token using the refresh token | `200 OK` | `401` refresh token invalid/expired or missing |
 | `POST /auth/logout` | Any authenticated role | Invalidates refresh token (removed/blacklisted), clears cookie | `204 No Content` | `401` not authenticated |
 | `GET /auth/google` | *(public)* | Initiates Google OAuth flow | `302` redirect to Google | — |
-| `GET /auth/google/callback` | *(public)* | OAuth callback, creates/logs in user, issues tokens | `200 OK` / redirect to frontend with token | `401` OAuth failure |
+| `GET /auth/google/callback` | *(public)* | OAuth callback, creates/logs in user, issues tokens. Always redirects the browser (never returns a JSON error response) — success redirects to `{FRONTEND_URL}/auth/callback#accessToken=...`, any failure (OAuth denied, exchange failed) redirects to `{FRONTEND_URL}/login?error=google_auth_failed` instead | `302` redirect to frontend with token in URL fragment | `302` redirect to frontend login page with an error query param (not a 401 — failures never throw here) |
 
 ---
 
@@ -26,7 +26,9 @@
 | Method + Path | Access | Purpose | Success | Key failures |
 |---|---|---|---|---|
 | `GET /users/me` | Any authenticated role (own) | Get own profile | `200 OK` | `401` |
-| `PATCH /users/me` | Any authenticated role (own) | Update own profile fields | `200 OK` | `400` invalid fields |
+| `PATCH /users/me` | Any authenticated role (own) | Update own profile fields (name only — email/password are not editable via this endpoint) | `200 OK` | `400` invalid fields |
+| `GET /users/me/addresses` | Any authenticated role (own) | List own saved delivery addresses | `200 OK` | `401` |
+| `POST /users/me/addresses` | Any authenticated role (own) | Save a new delivery address (`addressText`, optional `landmark`, `latitude`/`longitude`) | `201 Created` | `400` invalid input |
 | `GET /users` | Admin | List all Vendor/Customer accounts | `200 OK` | `403` non-admin |
 | `GET /users/:id` | Admin | View a specific account | `200 OK` | `404` not found; `403` non-admin |
 | `PATCH /users/:id/suspend` | Admin | Suspend an account | `200 OK` | `404`; `403`; `409` if already suspended |
@@ -89,7 +91,7 @@
 | `GET /inventory/mine` | Grower (own) | List all of the requesting Grower's own listings, including unpublished drafts and closed ones, with wholesale pricing always included | `200 OK` | `403` non-Grower |
 | `GET /inventory/upcoming` | Vendor | View listings/batches still growing, open for pre-booking | `200 OK` | `403` non-vendor |
 | `GET /inventory/:id` | *(public)* | Listing detail — retail price always shown; wholesale price/MOQ shown only to authenticated Vendors | `200 OK` | `404` |
-| `PATCH /inventory/:id` | Grower | Edit a Listing (note: price fields are locked post-publish per price-snapshotting rule — only non-price fields like description are editable) | `200 OK` | `404`; `409` if attempting to edit a locked price field |
+| `PATCH /inventory/:id` | Grower | Edit a Listing (`availableQuantity`, `description`, `images`, `isOrganicCertified`, `attributes`). Price fields (`retailPrice`/`wholesalePrice`/`minWholesaleQty`) are locked post-publish per price-snapshotting rule — enforced structurally, since `UpdateListingDto` doesn't accept them at all, not via a runtime conflict check | `200 OK` | `404`; `400` if the body includes an unrecognized field (e.g. a price field — `forbidNonWhitelisted` rejects it) |
 | `PATCH /inventory/:id/close` | Grower | Close/deactivate a Listing (soft close, not delete). Note: unlike `create`/`update`/`get`, the response does not merge in the Mongo `ListingContent` fields (`description`/`images`/`isOrganicCertified`/`attributes` come back unset) | `200 OK` | `404`; `409` if already closed |
 
 ---
@@ -98,11 +100,12 @@
 
 | Method + Path | Access | Purpose | Success | Key failures |
 |---|---|---|---|---|
-| `POST /orders` | Vendor, Customer | Place an actual order on live stock (COD/UPI/online); applies wholesale-vs-retail pricing logic and retail ceiling check server-side | `201 Created` | `400`; `409` insufficient stock or quantity exceeds retail ceiling (Customer) |
+| `POST /orders` | Vendor, Customer | Place an actual order on live stock; applies wholesale-vs-retail pricing logic and retail ceiling check server-side. **Response shape depends on `paymentMethod`**: `COD` creates a real `Order` immediately and decrements stock in the same transaction, returning the `Order`. `UPI`/`ONLINE` instead creates an `OrderIntent` (no stock decremented yet, no `Order` yet) and returns a Razorpay payment-intent response — the real `Order` is only created once the webhook confirms `payment.captured` | `201 Created` | `400`; `404` listing not found/not published; `409` insufficient stock (COD) or quantity exceeds retail ceiling (Customer) |
+| `POST /orders/verify-payment` | Vendor, Customer (own) | Client-side signature verification after the Razorpay Checkout modal closes, for an `OrderIntent` created by the `UPI`/`ONLINE` path above. Does **not** itself create the `Order` or decrement stock — only marks the `Payment` row `SUCCESS`; the webhook (§9) is what actually converts the intent into a real `Order` | `200 OK` | `400` invalid signature |
 | `GET /orders` | Vendor/Customer (own), Grower (own listings' orders), Admin (all) | List orders | `200 OK` | `401` |
 | `GET /orders/:id` | Vendor/Customer (own), Grower (own listing's order), Admin | View order detail + status | `200 OK` | `404`; `403` if not own and not Admin |
-| `PATCH /orders/:id/status` | Grower | Update fulfillment status (Confirmed → Out for Delivery/Ready for Pickup → Delivered/Picked Up) | `200 OK` | `404`; `409` invalid status transition |
-| `PATCH /orders/:id/dispute` | Admin | Resolve a disputed/stuck order (manual override) | `200 OK` | `404`; `403` non-admin |
+| `PATCH /orders/:id/status` | Grower | Advance fulfillment status one step (Confirmed → Out for Delivery/Ready for Pickup → Delivered/Picked Up) | `200 OK` | `404`; `409` invalid status transition |
+| `PATCH /orders/:id/dispute` | Admin | Force-cancel a disputed/stuck order and release its reserved stock. **Not** a general status override — the DTO only accepts `status: CANCELLED`, on purpose (an earlier version allowed any `OrderStatus` with no transition validation, letting nonsensical transitions like `DELIVERED → PLACED` through) | `200 OK` | `404`; `403` non-admin; `409` if already cancelled |
 | `PATCH /orders/:id/cancel` | Vendor/Customer (own, before fulfillment starts) | Cancel an order | `200 OK` | `404`; `409` if already past a cancellable status |
 
 ---
@@ -111,25 +114,29 @@
 
 | Method + Path | Access | Purpose | Success | Key failures |
 |---|---|---|---|---|
-| `POST /prebookings` | Vendor | Join the queue for a growing Batch, requesting a quantity | `201 Created` | `400` invalid quantity; `409` would exceed `preBookablePercent × predictedYield` (atomic Redis check) |
+| `POST /prebookings` | Vendor | Join the queue for a growing Batch, requesting a quantity | `201 Created` | `400` invalid quantity; `404` batch not found, or listing terms not set yet for this batch; `409` batch already harvested, or request would exceed `preBookablePercent × predictedYield` (atomic Redis check) |
 | `PATCH /prebookings/:id/cancel` | Vendor (own) | Cancel a queued pre-booking — **only allowed while status is `QUEUED`** (i.e., before stock goes live). Atomically decrements the Redis capacity counter, freeing that quantity for other Vendors. | `200 OK` | `404`; `409` if already `AWAITING_PAYMENT` or later (once live, cancellation is no longer available — see auto-expiry below) |
 | `GET /prebookings` | Vendor (own), Admin (all) | List pre-bookings | `200 OK` | `401` |
 | `GET /prebookings/:id` | Vendor (own), Admin | View a specific pre-booking's status | `200 OK` | `404`; `403` if not own |
 | `GET /prebookings/:id/payment-intent` | Vendor (own) | Once `AWAITING_PAYMENT`, initiate Razorpay order creation for the 20% advance | `200 OK` | `400` if still `QUEUED` |
-| `POST /prebookings/:id/verify-payment` | Vendor (own) | Frontend-side signature verification after Checkout modal closes (fast UX path) | `200 OK` | `400` invalid signature |
-| `POST /prebookings/webhook` | *(Razorpay only, signature-authenticated, not JWT)* | Trusted confirmation — moves status to `CONFIRMED`, creates an Order, decrements Inventory stock, deletes Redis hold | `200 OK` | `400` invalid webhook signature |
+| `POST /prebookings/:id/verify-payment` | Vendor (own) | Frontend-side signature verification after Checkout modal closes (fast UX path) — does not itself confirm the pre-booking; see `POST /payments/webhook` (§9) for that | `200 OK` | `400` invalid signature |
+
+There is no dedicated pre-booking webhook route — the trusted confirmation (moves status to `CONFIRMED`, creates an Order, decrements Inventory stock, deletes the Redis hold) happens through the single shared `POST /payments/webhook` in PaymentModule (§9), which routes to pre-booking vs. order confirmation logic based on which FK is set on the matched `Payment` row.
 
 ---
 
 ## 9. PaymentModule
 
-Mostly internal, invoked by OrderModule and PreBookingModule rather than called directly by end users — documented separately since it's shared logic.
+`PaymentsController` exposes exactly **one** HTTP route — the shared webhook. Razorpay order creation and signature verification are internal `PaymentsService` methods, not separate REST endpoints; they're invoked from inside OrderModule's and PreBookingModule's own routes (already documented in §7/§8):
+
+- `createOrderIntentPayment` — called from `POST /orders` when `paymentMethod` is `UPI`/`ONLINE`
+- `verifyOrderIntentPayment` — called from `POST /orders/verify-payment`
+- `createPreBookingPaymentIntent` — called from `GET /prebookings/:id/payment-intent`
+- `verifyPreBookingPayment` — called from `POST /prebookings/:id/verify-payment`
 
 | Method + Path | Access | Purpose | Success | Key failures |
 |---|---|---|---|---|
-| `POST /payments/create-order` | Internal (called by Order/PreBooking services) | Creates a Razorpay order object, returns `razorpay_order_id` | `200 OK` | `502` if Razorpay API call fails |
-| `POST /payments/verify` | Internal | HMAC signature verification of a payment response | `200 OK` | `400` invalid signature |
-| `POST /payments/webhook` | *(Razorpay only)* | Shared webhook receiver — routes to Order or PreBooking confirmation logic based on payload metadata | `200 OK` | `400` invalid signature |
+| `POST /payments/webhook` | *(Razorpay only, HMAC-signature-authenticated via `X-Razorpay-Signature`, not JWT)* | Shared webhook receiver for both flows — routes to Order or PreBooking confirmation logic based on which FK (`orderIntentId` vs `preBookingId`) is set on the matched `Payment` row. Idempotent: checks current state before acting, so retried webhook deliveries are safe | `200 OK` | `400` missing/invalid signature |
 
 ---
 
@@ -138,15 +145,17 @@ Mostly internal, invoked by OrderModule and PreBookingModule rather than called 
 | Method + Path | Access | Purpose | Success | Key failures |
 |---|---|---|---|---|
 | `POST /reviews` | Vendor, Customer (own, post-fulfillment order) | Submit a grower-level review tied to a completed order | `201 Created` | `400`; `404` order not found; `409` order not yet delivered/picked-up, or already reviewed |
-| `GET /reviews` | *(public)* | View all (non-hidden) reviews for the grower/business | `200 OK` | — |
-| `GET /reviews/:id` | *(public)* | View a specific review | `200 OK` | `404` |
-| `PATCH /reviews/:id/hide` | Admin | Moderate — hide an abusive/fake review | `200 OK` | `404`; `403` non-admin |
+| `GET /reviews` | *(public)* | View all non-hidden reviews for the grower/business, paginated (`?page=`, `?limit=`) | `200 OK` | — |
+| `GET /reviews/hidden` | Admin | View all hidden reviews, paginated (`?page=`, `?limit=`) — so a takedown can be reviewed/reversed, not just enforced. Registered ahead of `GET /reviews/:id` so `"hidden"` isn't matched as an id | `200 OK` | `403` non-admin |
+| `GET /reviews/:id` | *(public)* | View a specific review. A hidden review 404s here too (full takedown from public view, not just delisted from the browse list) | `200 OK` | `404` |
+| `PATCH /reviews/:id/hide` | Admin | Moderate — hide an abusive/fake review | `200 OK` | `404`; `403` non-admin; `409` if already hidden |
+| `PATCH /reviews/:id/unhide` | Admin | Reverse a hide — restore a review to public view | `200 OK` | `404`; `403` non-admin; `409` if not currently hidden |
 
 ---
 
 ## Notes & Open Questions Carried Forward
 
-1. **Vendor/Customer order cancellation — confirmed.** The `PATCH /orders/:id/cancel` endpoint stands as designed: cancellable by the order's owner (Vendor or Customer), only while the order is in a pre-fulfillment status (before "Out for Delivery"/"Ready for Pickup"). Exact cancellable-status cutoff to be finalized in schema design when the full order status enum is defined.
+1. **Vendor/Customer order cancellation — confirmed and implemented.** The `PATCH /orders/:id/cancel` endpoint stands as designed: cancellable by the order's owner (Vendor or Customer), only while status is `PLACED` or `CONFIRMED` (i.e., before "Out for Delivery"/"Ready for Pickup").
 2. **Pre-booking cancellation — confirmed.** Vendors may cancel a queued pre-booking any time before stock goes live (`PATCH /prebookings/:id/cancel`, status must still be `QUEUED`). Once stock goes live and status moves to `AWAITING_PAYMENT`, manual cancellation is no longer available — the only exit path at that point is the existing 48-hour auto-expiry (unpaid → `EXPIRED` → capacity released), not a user-initiated cancel. This keeps the Redis atomic counter consistent: a manual cancel decrements it explicitly while `QUEUED`; an expiry releases it automatically via TTL once live.
 3. **Cycle/Milestone edits after Batches exist — confirmed, edits allowed.** `PATCH /cycles/:id` and `PATCH /milestones/:id` no longer block on existing Batches — real-world delays and crop issues mean the Grower needs to adjust milestone durations/order even mid-use. **Schema implication worth flagging for the next phase:** since a Batch already *instantiates its own copy* of the Cycle's milestones at creation time (per §3.3 of the requirements doc), editing the Cycle template afterward only affects *future* Batches created from it going forward — it does not retroactively change milestone data on Batches already in progress, since those hold their own snapshot. This is consistent with the same snapshotting principle already applied to Listing prices.
 4. **Vendor review eligibility — confirmed.** Both Vendor and Customer roles can leave a grower-level review, under the same rule (post-fulfillment, one per completed order). Updated across the requirements doc and this endpoint accordingly.
