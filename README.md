@@ -89,6 +89,21 @@ See [`api/README.md`](api/README.md) for backend-specific commands (tests, linti
 
 Backend: [`https://farmcircle-api.onrender.com`](https://farmcircle-api.onrender.com) — a Render free-tier service, so the first request after ~15 minutes of inactivity can take 30–60 seconds to wake up.
 
+### Test Credentials
+
+Don't want to use your own Google account? Log in with these instead (Customer and Vendor roles only — sign-up for those two roles is open, but Grower/Admin aren't self-registerable, so there's nothing to demo there beyond what these accounts already show):
+
+| Role | Email | Password |
+|---|---|---|
+| Customer | `customer1@farmcircle.app` | `Customer123` |
+| Customer | `customer2@farmcircle.app` | `Customer123` |
+| Customer | `customer3@farmcircle.app` | `Customer123` |
+| Vendor | `vendor1@farmcircle.app` | `Vendor123` |
+| Vendor | `vendor2@farmcircle.app` | `Vendor123` |
+| Vendor | `vendor3@farmcircle.app` | `Vendor123` |
+
+The catalog has 50 seeded listings (produce, prices, wholesale/retail terms) to browse and order against.
+
 ---
 
 ## Project Status
