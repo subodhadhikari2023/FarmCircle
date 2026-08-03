@@ -1,20 +1,15 @@
 import { API_URL } from "./api";
 
-export type MilestoneProgress = {
+export type BatchTimelineMilestone = {
+  name: string;
   order: number;
+  expectedDurationDays: number;
   reachedAt: string | null;
-  milestone: {
-    name: string;
-    order: number;
-    expectedDurationDays: number;
-  };
 };
 
 export type BatchTimeline = {
-  id: string;
-  currentMilestoneOrder: number;
-  harvestConfirmed: boolean;
-  milestoneProgress: MilestoneProgress[];
+  batchId: string;
+  milestones: BatchTimelineMilestone[];
 };
 
 export async function getBatchTimeline(
